@@ -1502,12 +1502,12 @@ void setPinMapping(byte boardID)
         pinCoil2 = PB8; //Pin for coil 2
         pinCoil3 = PB3; //Pin for coil 3
         pinCoil4 = PA15; //Pin for coil 4
-        pinTPS = A2;//TPS input pin
-        pinMAP = A3; //MAP sensor pin
-        pinIAT = A0; //IAT sensor pin
-        pinCLT = A1; //CLS sensor pin
-        pinO2 = A8; //O2 Sensor pin
-        pinBat = A4; //Battery reference voltage pin
+        pinTPS = PA2;//TPS input pin
+        pinMAP = PA3; //MAP sensor pin
+        pinIAT = PA0; //IAT sensor pin
+        pinCLT = PA1; //CLS sensor pin
+        pinO2 = PB0; //O2 Sensor pin
+        pinBat = PA4; //Battery reference voltage pin
         pinBaro = pinMAP;
         pinTachOut = PB1; //Tacho output pin  (Goes to ULN2803)
         pinIdle1 = PB2; //Single wire idle control
@@ -1521,6 +1521,7 @@ void setPinMapping(byte boardID)
         pinFlex = PC14; // Flex sensor (Must be external interrupt enabled)
         pinTrigger = PC13; //The CAS pin also led pin so bad idea
         pinTrigger2 = PC15; //The Cam Sensor pin
+		pinVSS = PC14; //VSS input pin
       #endif
       break;
 
