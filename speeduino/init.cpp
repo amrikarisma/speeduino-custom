@@ -2061,21 +2061,21 @@ void setPinMapping(byte boardID)
     //   pinResetControl = 46; //Reset control output PLACEHOLDER value for now
 	// #endif
 	#if defined(STM32F407xx)
-		//Pin mappings for the MAZDUINO Compact v1.0 shield
+		//Pin mappings for the MAZDUINO
 		pinInjector1 = PD8; //Output pin injector 1
 		pinInjector2 = PB15; //Output pin injector 2
 		pinInjector3 = PB14; //Output pin injector 3
 		pinInjector4 = PB13; //Output pin injector 4
-		//   pinInjector5 = PA8; //Output pin injector 5
-		//   pinInjector6 = PE7; //Output pin injector 6
+		pinInjector5 = PD9; //Output pin injector 5
+		pinInjector6 = PE8; //Output pin injector 6
 		//   pinInjector7 = PE13; //Output pin injector 7 (placeholder)
 		//   pinInjector8 = PE10; //Output pin injector 8 (placeholder)
 		pinCoil1 = PE15; //Pin for coil 1
 		pinCoil2 = PE14; //Pin for coil 2
 		pinCoil3 = PD13; //Pin for coil 3
 		pinCoil4 = PE5; //Pin for coil 4
-		//   pinCoil5 = PE4; //Pin for coil 5
-		//   pinCoil6 = PE5; //Pin for coil 6
+		pinCoil5 = PE2; //Pin for coil 5
+		pinCoil6 = PE3; //Pin for coil 6
 		//   pinCoil7 = PE0; //Pin for coil 7 (placeholder)
 		//   pinCoil8 = PB9; //Pin for coil 8 (placeholder)
 		pinTrigger = PD3; //The CAS pin
@@ -2086,27 +2086,27 @@ void setPinMapping(byte boardID)
 		pinCLT = PA4; //CLS sensor pin
 		pinO2 = PA1; //O2 Sensor pin
 		pinBat = PA2; //Battery reference voltage pin
-		pinBaro = PA0; //Baro sensor pin - Placeholder
+		pinBaro = PA7; //Baro sensor pin - Placeholder
 		pinDisplayReset = PB7; // OLED reset pin
 		pinTachOut = PC9; //Tacho output pin  (Goes to ULN2003)
-		pinIdle1 = PD9; //ICV pin1
-		pinIdle2 = PD9; //placceholder	
-		pinBoost = PD10; //Boost control - Placeholder
-		pinVVT_1 = PD11; //VVT1 output (intake vanos) - Placeholder
-		pinVVT_2 = PD12; //VVT2 output (exhaust vanos) - Placeholder
+		pinIdle1 = PD10; //IACV pin1
+		pinIdle2 = PE9; //IACV pin2
+		pinBoost = PE2; //Boost control - Placeholder
+		pinVVT_1 = PE3; //VVT1 output (intake vanos) - Placeholder
+		pinVVT_2 = PD5; //VVT2 output (exhaust vanos) - Placeholder
 		pinFuelPump = PC8; //Fuel pump output  (Goes to ULN2003)
-		pinStepperDir = PB8; //Stepper valve isn't used with these - Placeholder
-		pinStepperStep = PB9; //Stepper valve isn't used with these - Placeholder
-		pinStepperEnable = PB12; //Stepper valve isn't used with these - Placeholder
+		pinStepperDir = PD12; //Stepper valve isn't used with these - Placeholder
+		pinStepperStep = PD15; //Stepper valve isn't used with these - Placeholder
+		pinStepperEnable = PD14; //Stepper valve isn't used with these - Placeholder
 		pinFan = PA15; //Pin for the fan output (Goes to ULN2003)
 		pinLaunch = PE13; //Launch control pin - for v.1.1 board
-		pinFlex = PE12; // Flex sensor - Placeholder
+		pinFlex = PD11; // Flex sensor - Placeholder
 		pinResetControl = PB7; //Reset control output
 		pinVSS = PD7; //VSS input pin
-		pinWMIEmpty = PE9; //(placeholder)
-		pinWMIIndicator = PE10; //(placeholder)
-		pinWMIEnabled = PE11; //(placeholder)
-		pinIdleUp = PE12; //(placeholder)
+		pinWMIEmpty = PC4; //(placeholder)
+		pinWMIIndicator = PC3; //(placeholder)
+		pinWMIEnabled = PC2; //(placeholder)
+		pinIdleUp = PD6; //(placeholder)
 		pinCTPS = PB6; //(placeholder)
 	#endif
 
