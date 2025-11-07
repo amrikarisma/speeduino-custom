@@ -48,7 +48,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "load_source.h"
 #include RTC_LIB_H //Defined in each boards .h file
 #include BOARD_H //Note that this is not a real file, it is defined in globals.h. 
-
+#include "units.h"
 
 uint16_t req_fuel_uS = 0; /**< The required fuel variable (As calculated by TunerStudio) in uS */
 uint16_t inj_opentime_uS = 0;
@@ -57,17 +57,25 @@ uint8_t ignitionChannelsOn; /**< The current state of the ignition system (on or
 uint8_t ignitionChannelsPending = 0; /**< Any ignition channels that are pending injections before they are resumed */
 uint8_t fuelChannelsOn; /**< The current state of the fuel system (on or off) */
 uint32_t rollingCutLastRev = 0; /**< Tracks whether we're on the same or a different rev for the rolling cut */
+uint32_t revLimitAllowedEndTime = 0;
 
 uint16_t staged_req_fuel_mult_pri = 0;
 uint16_t staged_req_fuel_mult_sec = 0;   
+
+static table2D_u8_u16_4 injectorAngleTable(&configPage2.injAngRPM, &configPage2.injAng);
+static table2D_u8_u8_8 rotarySplitTable(&configPage10.rotarySplitBins, &configPage10.rotarySplitValues);
+static table2D_i8_u8_4 rollingCutTable(&configPage15.rollingProtRPMDelta, &configPage15.rollingProtCutPercent);
+static table2D_u8_u8_10 idleTargetTable(&configPage6.iacBins, &configPage6.iacCLValues);
+
 #ifndef UNIT_TEST // Scope guard for unit testing
+
 void setup(void)
 {
   currentStatus.initialisationComplete = false; //Tracks whether the initialiseAll() function has run completely
   initialiseAll();
 }
 
-inline uint16_t applyFuelTrimToPW(trimTable3d *pTrimTable, int16_t fuelLoad, int16_t RPM, uint16_t currentPW)
+inline uint16_t applyFuelTrimToPW(trimTable3d *pTrimTable, uint16_t fuelLoad, int16_t RPM, uint16_t currentPW)
 {
     uint8_t pw1percent = 100U + get3DTableValue(pTrimTable, fuelLoad, RPM) - OFFSET_FUELTRIM;
     return percentage(pw1percent, currentPW);
@@ -111,22 +119,20 @@ void __attribute__((always_inline)) loop(void)
       }
 
       //Check for any new or in-progress requests from serial.
-      if (Serial.available()>0 || serialRecieveInProgress())
+      if( (Serial.available() > 0) || serialRecieveInProgress() )
       {
         serialReceive();
       }
       
-      //Check for any CAN comms requiring action 
-      #if defined(secondarySerial_AVAILABLE)
-        //if can or secondary serial interface is enabled then check for requests.
-        if (configPage9.enable_secondarySerial == 1)  //secondary serial interface enabled
-        {
-          if ( ((mainLoopCount & 31) == 1) || (secondarySerial.available() > SERIAL_BUFFER_THRESHOLD) )
-          {
-            if (secondarySerial.available() > 0)  { secondserial_Command(); }
-          } 
-        }
-      #endif
+      //Check for any secondary comms requiring action. Note that AVR runs this at a fixed 30Hz. 
+      if (configPage9.enable_secondarySerial == 1)  //secondary serial interface enabled
+      {
+        #ifndef CORE_AVR
+          if (secondarySerial.available() > 0)  { secondserial_Command(); }
+        #else
+          if (secondarySerial.available() > SERIAL_BUFFER_THRESHOLD) { secondserial_Command(); } //Special case for AVR units. This prevents potential overflow of the receive buffer
+        #endif
+      }
       #if defined (NATIVE_CAN_AVAILABLE)
         if (configPage9.enable_intcan == 1) // use internal can module
         {            
@@ -141,13 +147,13 @@ void __attribute__((always_inline)) loop(void)
         }   
       #endif
           
-    if(currentLoopTime > micros_safe())
+    if(currentLoopTime > micros())
     {
       //Occurs when micros() has overflowed
       deferEEPROMWritesUntil = 0; //Required to ensure that EEPROM writes are not deferred indefinitely
     }
 
-    currentLoopTime = micros_safe();
+    currentLoopTime = micros();
     if ( engineIsRunning(currentLoopTime) )
     {
       currentStatus.longRPM = getRPM(); //Long RPM is included here
@@ -169,7 +175,7 @@ void __attribute__((always_inline)) loop(void)
       currentStatus.VE2 = 0;
       resetDecoder();
       currentStatus.hasSync = false;
-      BIT_CLEAR(currentStatus.status3, BIT_STATUS3_HALFSYNC);
+      currentStatus.halfSync = false;
       currentStatus.runSecs = 0; //Reset the counter for number of seconds running.
       currentStatus.startRevolutions = 0;
       resetMAPcycleAndEvent();
@@ -180,12 +186,12 @@ void __attribute__((always_inline)) loop(void)
       fuelChannelsOn = 0;
       if (currentStatus.fpPrimed == true) { FUEL_PUMP_OFF(); currentStatus.fuelPumpOn = false; } //Turn off the fuel pump, but only if the priming is complete
       if (configPage6.iacPWMrun == false) { disableIdle(); } //Turn off the idle PWM
-      BIT_CLEAR(currentStatus.engine, BIT_ENGINE_CRANK); //Clear cranking bit (Can otherwise get stuck 'on' even with 0 rpm)
-      BIT_CLEAR(currentStatus.engine, BIT_ENGINE_WARMUP); //Same as above except for WUE
-      BIT_CLEAR(currentStatus.engine, BIT_ENGINE_RUN); //Same as above except for RUNNING status
-      BIT_CLEAR(currentStatus.engine, BIT_ENGINE_ASE); //Same as above except for ASE status
-      BIT_CLEAR(currentStatus.engine, BIT_ENGINE_ACC); //Same as above but the accel enrich (If using MAP accel enrich a stall will cause this to trigger)
-      BIT_CLEAR(currentStatus.engine, BIT_ENGINE_DCC); //Same as above but the decel enleanment
+      currentStatus.engineIsCranking = false; //Clear cranking bit (Can otherwise get stuck 'on' even with 0 rpm)
+      currentStatus.wueIsActive = false; //Same as above except for WUE
+      currentStatus.engineIsRunning = false; //Same as above except for RUNNING status
+      currentStatus.aseIsActive = false; //Same as above except for ASE status
+      currentStatus.isAcceleratingTPS = false; //Same as above but the accel enrich (If using MAP accel enrich a stall will cause this to trigger)
+      currentStatus.isDeceleratingTPS = false; //Same as above but the decel enleanment
       //This is a safety check. If for some reason the interrupts have got screwed up (Leading to 0rpm), this resets them.
       //It can possibly be run much less frequently.
       //This should only be run if the high speed logger are off because it will change the trigger interrupts back to defaults rather than the logger versions
@@ -247,6 +253,14 @@ void __attribute__((always_inline)) loop(void)
         if(configPage13.onboard_log_file_rate == LOGGER_RATE_30HZ) { writeSDLogEntry(); }
       #endif
 
+      //AVR units process secondary serial requests at a fixed 30Hz
+      #ifdef CORE_AVR
+      if( (configPage9.enable_secondarySerial == 1) && (secondarySerial.available() > 0) ) //secondary serial interface enabled
+      {
+        secondserial_Command();
+      }
+      #endif
+
       //Check for any outstanding EEPROM writes.
       if( (isEepromWritePending() == true) && (serialStatusFlag == SERIAL_INACTIVE) && (micros() > deferEEPROMWritesUntil)) { writeAllConfig(); } 
     }
@@ -271,7 +285,7 @@ void __attribute__((always_inline)) loop(void)
       #endif
 
       //And check whether the tooth log buffer is ready
-      if(toothHistoryIndex > TOOTH_LOG_SIZE) { BIT_SET(currentStatus.status1, BIT_STATUS1_TOOTHLOG1READY); }
+      if(toothHistoryIndex > TOOTH_LOG_SIZE) { currentStatus.isToothLog1Full = true; }
     }
     if(BIT_CHECK(LOOP_TIMER, BIT_TIMER_10HZ)) //10 hertz
     {
@@ -306,19 +320,18 @@ void __attribute__((always_inline)) loop(void)
       //Lookup the current target idle RPM. This is aligned with coolant and so needs to be calculated at the same rate CLT is read
       if( (configPage2.idleAdvEnabled >= 1) || (configPage6.iacAlgorithm != IAC_ALGORITHM_NONE) )
       {
-        currentStatus.CLIdleTarget = (byte)table2D_getValue(&idleTargetTable, currentStatus.coolant + CALIBRATION_TEMPERATURE_OFFSET); //All temps are offset by 40 degrees
-        if(BIT_CHECK(currentStatus.airConStatus, BIT_AIRCON_TURNING_ON)) { currentStatus.CLIdleTarget += configPage15.airConIdleUpRPMAdder;  } //Adds Idle Up RPM amount if active
+        currentStatus.CLIdleTarget = table2D_getValue(&idleTargetTable, temperatureAddOffset(currentStatus.coolant)); //All temps are offset by 40 degrees
+        if(currentStatus.airconTurningOn) { currentStatus.CLIdleTarget += configPage15.airConIdleUpRPMAdder;  } //Adds Idle Up RPM amount if active
       }
 
       #ifdef SD_LOGGING
         if(configPage13.onboard_log_file_rate == LOGGER_RATE_4HZ) { writeSDLogEntry(); }
-        syncSDLog(); //Sync the SD log file to the card 4 times per second. 
       #endif  
       
       currentStatus.fuelPressure = getFuelPressure();
       currentStatus.oilPressure = getOilPressure();
       
-      if(auxIsEnabled == true)
+      if(BIT_CHECK(statusSensors, BIT_SENSORS_AUX_ENBL))
       {
         //TODO dazq to clean this right up :)
         //check through the Aux input channels if enabled for Can or local use
@@ -378,12 +391,13 @@ void __attribute__((always_inline)) loop(void)
     if (BIT_CHECK(LOOP_TIMER, BIT_TIMER_1HZ)) //Once per second)
     {
       BIT_CLEAR(TIMER_mask, BIT_TIMER_1HZ);
+      currentStatus.systemTemp = getSystemTemp();
       readBaro(); //Infrequent baro readings are not an issue.
 
       if ( (configPage10.wmiEnabled > 0) && (configPage10.wmiIndicatorEnabled > 0) )
       {
         // water tank empty
-        if (BIT_CHECK(currentStatus.status4, BIT_STATUS4_WMI_EMPTY) > 0)
+        if (currentStatus.wmiTankEmpty)
         {
           // flash with 1sec interval
           digitalWrite(pinWMIIndicator, !digitalRead(pinWMIIndicator));
@@ -396,6 +410,12 @@ void __attribute__((always_inline)) loop(void)
 
       #ifdef SD_LOGGING
         if(configPage13.onboard_log_file_rate == LOGGER_RATE_1HZ) { writeSDLogEntry(); }
+        //SD log sync can take up to 8ms on slow SD cards. To prevent potential issues we only perform this if the RPM is under a safe speed so that there will always be sufficient time for a main loop to run. 
+        //A sync will be forced if it hasn't taken place within a max period
+        if( (currentStatus.RPM < SD_SYNC_RPM_THRESHOLD) || (msSinceLastSDSync > SD_SYNC_MAX_TIME_PERIOD) )
+        { 
+          if(syncSDLog()) { msSinceLastSDSync = 0; } //Run SD sync and reset  
+        }
       #endif
 
     } //1Hz timer
@@ -420,26 +440,26 @@ void __attribute__((always_inline)) loop(void)
 
     //Always check for sync
     //Main loop runs within this clause
-    if ((currentStatus.hasSync || BIT_CHECK(currentStatus.status3, BIT_STATUS3_HALFSYNC)) && (currentStatus.RPM > 0))
+    if ((currentStatus.hasSync || currentStatus.halfSync) && (currentStatus.RPM > 0))
     {
         //Check whether running or cranking
         if(currentStatus.RPM > currentStatus.crankRPM) //Crank RPM in the config is stored as a x10. currentStatus.crankRPM is set in timers.ino and represents the true value
         {
-          BIT_SET(currentStatus.engine, BIT_ENGINE_RUN); //Sets the engine running bit
+          currentStatus.engineIsRunning = true; //Sets the engine running bit
           //Only need to do anything if we're transitioning from cranking to running
-          if( BIT_CHECK(currentStatus.engine, BIT_ENGINE_CRANK) )
+          if( currentStatus.engineIsCranking )
           {
-            BIT_CLEAR(currentStatus.engine, BIT_ENGINE_CRANK);
+            currentStatus.engineIsCranking = false;
             if(configPage4.ignBypassEnabled > 0) { digitalWrite(pinIgnBypass, HIGH); }
           }
         }
         else
         {  
-          if( !BIT_CHECK(currentStatus.engine, BIT_ENGINE_RUN) || (currentStatus.RPM < (currentStatus.crankRPM - CRANK_RUN_HYSTER)) )
+          if( !currentStatus.engineIsRunning || (currentStatus.RPM < (currentStatus.crankRPM - CRANK_RUN_HYSTER)) )
           {
             //Sets the engine cranking bit, clears the engine running bit
-            BIT_SET(currentStatus.engine, BIT_ENGINE_CRANK);
-            BIT_CLEAR(currentStatus.engine, BIT_ENGINE_RUN);
+            currentStatus.engineIsCranking = true;
+            currentStatus.engineIsRunning = false;
             currentStatus.runSecs = 0; //We're cranking (hopefully), so reset the engine run time to prompt ASE.
             if(configPage4.ignBypassEnabled > 0) { digitalWrite(pinIgnBypass, LOW); }
 
@@ -494,7 +514,7 @@ void __attribute__((always_inline)) loop(void)
       //Check that the duty cycle of the chosen pulsewidth isn't too high.
       uint16_t pwLimit = calculatePWLimit();
       //Apply the pwLimit if staging is disabled and engine is not cranking
-      if( (!BIT_CHECK(currentStatus.engine, BIT_ENGINE_CRANK)) && (configPage10.stagingEnabled == false) ) { if (currentStatus.PW1 > pwLimit) { currentStatus.PW1 = pwLimit; } }
+      if( (!currentStatus.engineIsCranking) && (configPage10.stagingEnabled == false) ) { if (currentStatus.PW1 > pwLimit) { currentStatus.PW1 = pwLimit; } }
 
       calculateStaging(pwLimit);
 
@@ -513,7 +533,7 @@ void __attribute__((always_inline)) loop(void)
         //Single cylinder
         case 1:
           //The only thing that needs to be done for single cylinder is to check for staging. 
-          if( (configPage10.stagingEnabled == true) && (BIT_CHECK(currentStatus.status4, BIT_STATUS4_STAGING_ACTIVE) == true) )
+          if( (configPage10.stagingEnabled == true) && (currentStatus.stagingActive == true) )
           {
             PWdivTimerPerDegree = timeToAngleDegPerMicroSec(currentStatus.PW2); //Need to redo this for PW2 as it will be dramatically different to PW1 when staging
             //injector3StartAngle = calculateInjector3StartAngle(PWdivTimerPerDegree);
@@ -530,7 +550,7 @@ void __attribute__((always_inline)) loop(void)
             currentStatus.PW1 = applyFuelTrimToPW(&trim1Table, currentStatus.fuelLoad, currentStatus.RPM, currentStatus.PW1);
             currentStatus.PW2 = applyFuelTrimToPW(&trim2Table, currentStatus.fuelLoad, currentStatus.RPM, currentStatus.PW2);
           }
-          else if( (configPage10.stagingEnabled == true) && (BIT_CHECK(currentStatus.status4, BIT_STATUS4_STAGING_ACTIVE) == true) )
+          else if( (configPage10.stagingEnabled == true) && (currentStatus.stagingActive == true) )
           {
             PWdivTimerPerDegree = timeToAngleDegPerMicroSec(currentStatus.PW3); //Need to redo this for PW3 as it will be dramatically different to PW1 when staging
             injector3StartAngle = calculateInjectorStartAngle(PWdivTimerPerDegree, channel1InjDegrees, currentStatus.injAngle);
@@ -554,7 +574,7 @@ void __attribute__((always_inline)) loop(void)
             currentStatus.PW3 = applyFuelTrimToPW(&trim3Table, currentStatus.fuelLoad, currentStatus.RPM, currentStatus.PW3);
 
             #if INJ_CHANNELS >= 6
-              if( (configPage10.stagingEnabled == true) && (BIT_CHECK(currentStatus.status4, BIT_STATUS4_STAGING_ACTIVE) == true) )
+              if( (configPage10.stagingEnabled == true) && (currentStatus.stagingActive == true) )
               {
                 PWdivTimerPerDegree = timeToAngleDegPerMicroSec(currentStatus.PW4); //Need to redo this for PW4 as it will be dramatically different to PW1 when staging
                 injector4StartAngle = calculateInjectorStartAngle(PWdivTimerPerDegree, channel1InjDegrees, currentStatus.injAngle);
@@ -563,7 +583,7 @@ void __attribute__((always_inline)) loop(void)
               }
             #endif
           }
-          else if( (configPage10.stagingEnabled == true) && (BIT_CHECK(currentStatus.status4, BIT_STATUS4_STAGING_ACTIVE) == true) )
+          else if( (configPage10.stagingEnabled == true) && (currentStatus.stagingActive == true) )
           {
             PWdivTimerPerDegree = timeToAngleDegPerMicroSec(currentStatus.PW4); //Need to redo this for PW3 as it will be dramatically different to PW1 when staging
             injector4StartAngle = calculateInjectorStartAngle(PWdivTimerPerDegree, channel1InjDegrees, currentStatus.injAngle);
@@ -585,7 +605,7 @@ void __attribute__((always_inline)) loop(void)
             injector3StartAngle = calculateInjectorStartAngle(PWdivTimerPerDegree, channel3InjDegrees, currentStatus.injAngle);
             injector4StartAngle = calculateInjectorStartAngle(PWdivTimerPerDegree, channel4InjDegrees, currentStatus.injAngle);
             #if INJ_CHANNELS >= 8
-              if( (configPage10.stagingEnabled == true) && (BIT_CHECK(currentStatus.status4, BIT_STATUS4_STAGING_ACTIVE) == true) )
+              if( (configPage10.stagingEnabled == true) && (currentStatus.stagingActive == true) )
               {
                 PWdivTimerPerDegree = timeToAngleDegPerMicroSec(currentStatus.PW5); //Need to redo this for PW5 as it will be dramatically different to PW1 when staging
                 injector5StartAngle = calculateInjectorStartAngle(PWdivTimerPerDegree, channel1InjDegrees, currentStatus.injAngle);
@@ -603,7 +623,7 @@ void __attribute__((always_inline)) loop(void)
               currentStatus.PW4 = applyFuelTrimToPW(&trim4Table, currentStatus.fuelLoad, currentStatus.RPM, currentStatus.PW4);
             }
           }
-          else if( (configPage10.stagingEnabled == true) && (BIT_CHECK(currentStatus.status4, BIT_STATUS4_STAGING_ACTIVE) == true) )
+          else if( (configPage10.stagingEnabled == true) && (currentStatus.stagingActive == true) )
           {
             PWdivTimerPerDegree = timeToAngleDegPerMicroSec(currentStatus.PW3); //Need to redo this for PW3 as it will be dramatically different to PW1 when staging
             injector3StartAngle = calculateInjectorStartAngle(PWdivTimerPerDegree, channel1InjDegrees, currentStatus.injAngle);
@@ -611,7 +631,7 @@ void __attribute__((always_inline)) loop(void)
           }
           else
           {
-            if( BIT_CHECK(currentStatus.status3, BIT_STATUS3_HALFSYNC) && (CRANK_ANGLE_MAX_INJ != 360) ) { changeFullToHalfSync(); }
+            if( currentStatus.halfSync && (CRANK_ANGLE_MAX_INJ != 360) ) { changeFullToHalfSync(); }
           }
           break;
         //5 cylinders
@@ -625,7 +645,7 @@ void __attribute__((always_inline)) loop(void)
 
           //Staging is possible by using the 6th channel if available
           #if INJ_CHANNELS >= 6
-            if( (configPage10.stagingEnabled == true) && (BIT_CHECK(currentStatus.status4, BIT_STATUS4_STAGING_ACTIVE) == true) )
+            if( (configPage10.stagingEnabled == true) && (currentStatus.stagingActive == true) )
             {
               PWdivTimerPerDegree = timeToAngleDegPerMicroSec(currentStatus.PW6);
               injector6StartAngle = calculateInjectorStartAngle(PWdivTimerPerDegree, channel6InjDegrees, currentStatus.injAngle);
@@ -659,7 +679,7 @@ void __attribute__((always_inline)) loop(void)
 
               //Staging is possible with sequential on 8 channel boards by using outputs 7 + 8 for the staged injectors
               #if INJ_CHANNELS >= 8
-                if( (configPage10.stagingEnabled == true) && (BIT_CHECK(currentStatus.status4, BIT_STATUS4_STAGING_ACTIVE) == true) )
+                if( (configPage10.stagingEnabled == true) && (currentStatus.stagingActive == true) )
                 {
                   PWdivTimerPerDegree = timeToAngleDegPerMicroSec(currentStatus.PW4); //Need to redo this for staging PW as it will be dramatically different to PW1 when staging
                   injector4StartAngle = calculateInjectorStartAngle(PWdivTimerPerDegree, channel1InjDegrees, currentStatus.injAngle);
@@ -670,9 +690,9 @@ void __attribute__((always_inline)) loop(void)
             }
             else
             {
-              if( BIT_CHECK(currentStatus.status3, BIT_STATUS3_HALFSYNC) && (CRANK_ANGLE_MAX_INJ != 360) ) { changeFullToHalfSync(); }
+              if( currentStatus.halfSync && (CRANK_ANGLE_MAX_INJ != 360) ) { changeFullToHalfSync(); }
 
-              if( (configPage10.stagingEnabled == true) && (BIT_CHECK(currentStatus.status4, BIT_STATUS4_STAGING_ACTIVE) == true) )
+              if( (configPage10.stagingEnabled == true) && (currentStatus.stagingActive == true) )
               {
                 PWdivTimerPerDegree = timeToAngleDegPerMicroSec(currentStatus.PW4); //Need to redo this for staging PW as it will be dramatically different to PW1 when staging
                 injector4StartAngle = calculateInjectorStartAngle(PWdivTimerPerDegree, channel1InjDegrees, currentStatus.injAngle);
@@ -712,9 +732,9 @@ void __attribute__((always_inline)) loop(void)
             }
             else
             {
-              if( BIT_CHECK(currentStatus.status3, BIT_STATUS3_HALFSYNC) && (CRANK_ANGLE_MAX_INJ != 360) ) { changeFullToHalfSync(); }
+              if( currentStatus.halfSync && (CRANK_ANGLE_MAX_INJ != 360) ) { changeFullToHalfSync(); }
 
-              if( (configPage10.stagingEnabled == true) && (BIT_CHECK(currentStatus.status4, BIT_STATUS4_STAGING_ACTIVE) == true) )
+              if( (configPage10.stagingEnabled == true) && (currentStatus.stagingActive == true) )
               {
                 PWdivTimerPerDegree = timeToAngleDegPerMicroSec(currentStatus.PW5); //Need to redo this for PW3 as it will be dramatically different to PW1 when staging
                 injector5StartAngle = calculateInjectorStartAngle(PWdivTimerPerDegree, channel1InjDegrees, currentStatus.injAngle);
@@ -737,7 +757,7 @@ void __attribute__((always_inline)) loop(void)
 
       //Set dwell
       //Dwell is stored as ms * 10. ie Dwell of 4.3ms would be 43 in configPage4. This number therefore needs to be multiplied by 100 to get dwell in uS
-      if ( BIT_CHECK(currentStatus.engine, BIT_ENGINE_CRANK) ) {
+      if ( currentStatus.engineIsCranking ) {
         currentStatus.dwell =  (configPage4.dwellCrank * 100U); //use cranking dwell
       }
       else 
@@ -795,7 +815,20 @@ void __attribute__((always_inline)) loop(void)
       maxAllowedRPM = maxAllowedRPM * 100; //All of the above limits are divided by 100, convert back to RPM
       if ( (currentStatus.flatShiftingHard == true) && (currentStatus.clutchEngagedRPM < maxAllowedRPM) ) { maxAllowedRPM = currentStatus.clutchEngagedRPM; } //Flat shifting is a special case as the RPM limit is based on when the clutch was engaged. It is not divided by 100 as it is set with the actual RPM
     
-      if( (configPage2.hardCutType == HARD_CUT_FULL) && (currentStatus.RPM > maxAllowedRPM) )
+      if(currentStatus.RPM >= maxAllowedRPM)
+      {
+        currentStatus.hardLimitActive = true;
+      }
+      else if(currentStatus.hardLimitActive)
+      {
+        //if(micros() > revLimitAllowedEndTime) //Hysteresis check disabled for now. 
+        {
+          revLimitAllowedEndTime = 0;
+          currentStatus.hardLimitActive = false;
+        }
+      }
+
+      if( (configPage2.hardCutType == HARD_CUT_FULL) && currentStatus.hardLimitActive)
       {
         //Full hard cut turns outputs off completely. 
         switch(configPage6.engineProtectType)
@@ -804,17 +837,21 @@ void __attribute__((always_inline)) loop(void)
             //Make sure all channels are turned on
             ignitionChannelsOn = 0xFF;
             fuelChannelsOn = 0xFF;
-            currentStatus.engineProtectStatus = 0;
+            resetEngineProtect(currentStatus);
             break;
           case PROTECT_CUT_IGN:
             ignitionChannelsOn = 0;
+            disableAllIgnSchedules();
             break;
           case PROTECT_CUT_FUEL:
             fuelChannelsOn = 0;
+            disableAllFuelSchedules();
             break;
           case PROTECT_CUT_BOTH:
             ignitionChannelsOn = 0;
             fuelChannelsOn = 0;
+            disableAllIgnSchedules();
+            disableAllFuelSchedules();
             break;
           default:
             ignitionChannelsOn = 0;
@@ -834,7 +871,7 @@ void __attribute__((always_inline)) loop(void)
           uint8_t cutPercent = 0;
           int16_t rpmDelta = currentStatus.RPM - maxAllowedRPM;
           if(rpmDelta >= 0) { cutPercent = 100; } //If the current RPM is over the max allowed RPM then cut is full (100%)
-          else { cutPercent = table2D_getValue(&rollingCutTable, (rpmDelta / 10) ); } //
+          else { cutPercent = table2D_getValue(&rollingCutTable, (int8_t)(rpmDelta / 10) ); } //
           
 
           for(uint8_t x=0; x<max(maxIgnOutputs, maxInjOutputs); x++)
@@ -850,17 +887,17 @@ void __attribute__((always_inline)) loop(void)
                   break;
                 case PROTECT_CUT_IGN:
                   BIT_CLEAR(ignitionChannelsOn, x); //Turn off this ignition channel
-                  disablePendingIgnSchedule(x);
+                  disableIgnSchedule(x);
                   break;
                 case PROTECT_CUT_FUEL:
                   BIT_CLEAR(fuelChannelsOn, x); //Turn off this fuel channel
-                  disablePendingFuelSchedule(x);
+                  disableFuelSchedule(x);
                   break;
                 case PROTECT_CUT_BOTH:
                   BIT_CLEAR(ignitionChannelsOn, x); //Turn off this ignition channel
                   BIT_CLEAR(fuelChannelsOn, x); //Turn off this fuel channel
-                  disablePendingFuelSchedule(x);
-                  disablePendingIgnSchedule(x);
+                  disableFuelSchedule(x);
+                  disableIgnSchedule(x);
                   break;
                 default:
                   BIT_CLEAR(ignitionChannelsOn, x); //Turn off this ignition channel
@@ -897,7 +934,7 @@ void __attribute__((always_inline)) loop(void)
       } //Rolling cut check
       else
       {
-        currentStatus.engineProtectStatus = 0;
+        resetEngineProtect(currentStatus);
         //No engine protection active, so turn all the channels on
         if(currentStatus.startRevolutions >= configPage4.StgCycles)
         { 
@@ -1035,7 +1072,7 @@ void __attribute__((always_inline)) loop(void)
       //Same as above, except for ignition
 
       //fixedCrankingOverride is used to extend the dwell during cranking so that the decoder can trigger the spark upon seeing a certain tooth. Currently only available on the basic distributor and 4g63 decoders.
-      if ( configPage4.ignCranklock && BIT_CHECK(currentStatus.engine, BIT_ENGINE_CRANK) && (BIT_CHECK(decoderState, BIT_DECODER_HAS_FIXED_CRANKING)) )
+      if ( configPage4.ignCranklock && currentStatus.engineIsCranking && (BIT_CHECK(decoderState, BIT_DECODER_HAS_FIXED_CRANKING)) )
       {
         fixedCrankingOverride = currentStatus.dwell * 3;
         //This is a safety step to prevent the ignition start time occurring AFTER the target tooth pulse has already occurred. It simply moves the start time forward a little, which is compensated for by the increase in the dwell time
@@ -1188,17 +1225,17 @@ void __attribute__((always_inline)) loop(void)
 
       } //Ignition schedules on
 
-      if ( (!BIT_CHECK(currentStatus.status3, BIT_STATUS3_RESET_PREVENT)) && (resetControl == RESET_CONTROL_PREVENT_WHEN_RUNNING) ) 
+      if ( (!currentStatus.resetPreventActive) && (resetControl == RESET_CONTROL_PREVENT_WHEN_RUNNING) ) 
       {
         //Reset prevention is supposed to be on while the engine is running but isn't. Fix that.
         digitalWrite(pinResetControl, HIGH);
-        BIT_SET(currentStatus.status3, BIT_STATUS3_RESET_PREVENT);
+        currentStatus.resetPreventActive = true;
       }
     } //Has sync and RPM
-    else if ( (BIT_CHECK(currentStatus.status3, BIT_STATUS3_RESET_PREVENT) > 0) && (resetControl == RESET_CONTROL_PREVENT_WHEN_RUNNING) )
+    else if ( (currentStatus.resetPreventActive) && (resetControl == RESET_CONTROL_PREVENT_WHEN_RUNNING) )
     {
       digitalWrite(pinResetControl, LOW);
-      BIT_CLEAR(currentStatus.status3, BIT_STATUS3_RESET_PREVENT);
+      currentStatus.resetPreventActive = false;
     }
 } //loop()
 #pragma GCC diagnostic pop
@@ -1266,7 +1303,7 @@ uint16_t PW(int REQ_FUEL, byte VE, long MAP, uint16_t corrections, int injOpen)
     //If intermediate is not 0, we need to add the opening time (0 typically indicates that one of the full fuel cuts is active)
     intermediate += injOpen; //Add the injector opening time
     //AE calculation only when ACC is active.
-    if ( BIT_CHECK(currentStatus.engine, BIT_ENGINE_ACC) )
+    if ( currentStatus.isAcceleratingTPS )
     {
       //AE Adds % of req_fuel
       if ( configPage2.aeApplyMode == AE_MODE_ADDER )
@@ -1345,7 +1382,7 @@ void calculateIgnitionAngles(uint16_t dwellAngle)
       else if(configPage4.sparkMode == IGN_MODE_ROTARY)
       {
         byte splitDegrees = 0;
-        splitDegrees = table2D_getValue(&rotarySplitTable, currentStatus.ignLoad);
+        splitDegrees = table2D_getValue(&rotarySplitTable, (uint8_t)currentStatus.ignLoad);
 
         //The trailing angles are set relative to the leading ones
         calculateIgnitionTrailingRotary(dwellAngle, splitDegrees, ignition1EndAngle, &ignition3EndAngle, &ignition3StartAngle);
@@ -1353,7 +1390,7 @@ void calculateIgnitionAngles(uint16_t dwellAngle)
       }
       else
       {
-        if( BIT_CHECK(currentStatus.status3, BIT_STATUS3_HALFSYNC) && (CRANK_ANGLE_MAX_IGN != 360) ) { changeFullToHalfSync(); }
+        if( currentStatus.halfSync && (CRANK_ANGLE_MAX_IGN != 360) ) { changeFullToHalfSync(); }
       }
       #endif
       break;
@@ -1384,7 +1421,7 @@ void calculateIgnitionAngles(uint16_t dwellAngle)
       }
       else
       {
-        if( BIT_CHECK(currentStatus.status3, BIT_STATUS3_HALFSYNC) && (CRANK_ANGLE_MAX_IGN != 360) ) { changeFullToHalfSync(); }
+        if( currentStatus.halfSync && (CRANK_ANGLE_MAX_IGN != 360) ) { changeFullToHalfSync(); }
       }
       #endif
       break;
@@ -1407,7 +1444,7 @@ void calculateIgnitionAngles(uint16_t dwellAngle)
       }
       else
       {
-        if( BIT_CHECK(currentStatus.status3, BIT_STATUS3_HALFSYNC) && (CRANK_ANGLE_MAX_IGN != 360) ) { changeFullToHalfSync(); }
+        if( currentStatus.halfSync && (CRANK_ANGLE_MAX_IGN != 360) ) { changeFullToHalfSync(); }
       }
       #endif
       break;
@@ -1469,13 +1506,13 @@ void calculateStaging(uint32_t pwLimit)
       //PW2 is used temporarily to hold the secondary injector pulsewidth. It will be assigned to the correct channel below
       if(stagingSplit > 0) 
       { 
-        BIT_SET(currentStatus.status4, BIT_STATUS4_STAGING_ACTIVE); //Set the staging active flag
+        currentStatus.stagingActive = true; //Set the staging active flag
         currentStatus.PW2 = div100(stagingSplit * tempPW3); 
         currentStatus.PW2 += inj_opentime_uS;
       }
       else
       {
-        BIT_CLEAR(currentStatus.status4, BIT_STATUS4_STAGING_ACTIVE); //Clear the staging active flag
+        currentStatus.stagingActive = false; //Clear the staging active flag
         currentStatus.PW2 = 0; 
       }
     }
@@ -1486,7 +1523,7 @@ void calculateStaging(uint32_t pwLimit)
       //If they exceed their limit, the extra duty is passed to the secondaries
       if(tempPW1 > pwLimit)
       {
-        BIT_SET(currentStatus.status4, BIT_STATUS4_STAGING_ACTIVE); //Set the staging active flag
+        currentStatus.stagingActive = true; //Set the staging active flag
         uint32_t extraPW = tempPW1 - pwLimit + inj_opentime_uS; //The open time must be added here AND below because tempPW1 does not include an open time. The addition of it here takes into account the fact that pwLlimit does not contain an allowance for an open time. 
         currentStatus.PW1 = pwLimit;
         currentStatus.PW2 = udiv_32_16(extraPW * staged_req_fuel_mult_sec, staged_req_fuel_mult_pri); //Convert the 'left over' fuel amount from primary injector scaling to secondary
@@ -1496,7 +1533,7 @@ void calculateStaging(uint32_t pwLimit)
       {
         //If tempPW1 < pwLImit it means that the entire fuel load can be handled by the primaries and staging is inactive. 
         currentStatus.PW1 += inj_opentime_uS; //Add the open time back in
-        BIT_CLEAR(currentStatus.status4, BIT_STATUS4_STAGING_ACTIVE); //Clear the staging active flag 
+        currentStatus.stagingActive = false; //Clear the staging active flag 
         currentStatus.PW2 = 0; //Secondary PW is simply set to 0 as it is not required
       } 
     }
@@ -1638,7 +1675,7 @@ void calculateStaging(uint32_t pwLimit)
     if(maxInjOutputs >= 8) { currentStatus.PW8 = currentStatus.PW1; }
     else { currentStatus.PW8 = 0; }
 
-    BIT_CLEAR(currentStatus.status4, BIT_STATUS4_STAGING_ACTIVE); //Clear the staging active flag
+    currentStatus.stagingActive = false; //Clear the staging active flag
     
   } 
 
@@ -1653,12 +1690,14 @@ void checkLaunchAndFlatShift()
   {
     if(configPage6.launchHiLo > 0) { currentStatus.clutchTrigger = digitalRead(pinLaunch); }
     else { currentStatus.clutchTrigger = !digitalRead(pinLaunch); }
+
+    currentStatus.clutchTriggerActive = currentStatus.clutchTrigger; //Stores the value to send to TunerStudio
   }
   if(currentStatus.clutchTrigger && (currentStatus.previousClutchTrigger != currentStatus.clutchTrigger) ) { currentStatus.clutchEngagedRPM = currentStatus.RPM; } //Check whether the clutch has been engaged or disengaged and store the current RPM if so
 
   //Default flags to off
   currentStatus.launchingHard = false; 
-  BIT_CLEAR(currentStatus.status2, BIT_STATUS2_HLAUNCH); 
+  currentStatus.hardLaunchActive = false;
   currentStatus.flatShiftingHard = false;
 
   if (configPage6.launchEnabled && currentStatus.clutchTrigger && (currentStatus.clutchEngagedRPM < ((unsigned int)(configPage6.flatSArm) * 100)) && (currentStatus.TPS >= configPage10.lnchCtrlTPS) ) 
@@ -1674,7 +1713,7 @@ void checkLaunchAndFlatShift()
       {
         //HardCut rev limit for 2-step launch control.
         currentStatus.launchingHard = true; 
-        BIT_SET(currentStatus.status2, BIT_STATUS2_HLAUNCH); 
+        currentStatus.hardLaunchActive = true;
       }
     }
   } 

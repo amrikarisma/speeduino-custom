@@ -4,6 +4,7 @@
 #include BOARD_H //Note that this is not a real file, it is defined in globals.h. 
 
 #include <SimplyAtomic.h>
+#include "port_pin.h"
 
 void initialiseAuxPWM(void);
 void boostControl(void);
@@ -67,10 +68,10 @@ void wmiControl(void);
 
 #endif
 
-#define AIRCON_ON()             ATOMIC() { ((((configPage15.airConCompPol)==1)) ? AIRCON_PIN_LOW() : AIRCON_PIN_HIGH()); BIT_SET(currentStatus.airConStatus, BIT_AIRCON_COMPRESSOR); }
-#define AIRCON_OFF()            ATOMIC() { ((((configPage15.airConCompPol)==1)) ? AIRCON_PIN_HIGH() : AIRCON_PIN_LOW()); BIT_CLEAR(currentStatus.airConStatus, BIT_AIRCON_COMPRESSOR); }
-#define AIRCON_FAN_ON()         ATOMIC() { ((((configPage15.airConFanPol)==1)) ? AIRCON_FAN_PIN_LOW() : AIRCON_FAN_PIN_HIGH()); BIT_SET(currentStatus.airConStatus, BIT_AIRCON_FAN); }
-#define AIRCON_FAN_OFF()        ATOMIC() { ((((configPage15.airConFanPol)==1)) ? AIRCON_FAN_PIN_HIGH() : AIRCON_FAN_PIN_LOW()); BIT_CLEAR(currentStatus.airConStatus, BIT_AIRCON_FAN); }
+#define AIRCON_ON()             ATOMIC() { ((((configPage15.airConCompPol)==1)) ? AIRCON_PIN_LOW() : AIRCON_PIN_HIGH()); currentStatus.airconCompressorOn = true; }
+#define AIRCON_OFF()            ATOMIC() { ((((configPage15.airConCompPol)==1)) ? AIRCON_PIN_HIGH() : AIRCON_PIN_LOW()); currentStatus.airconCompressorOn = false; }
+#define AIRCON_FAN_ON()         ATOMIC() { ((((configPage15.airConFanPol)==1)) ? AIRCON_FAN_PIN_LOW() : AIRCON_FAN_PIN_HIGH()); currentStatus.airconFanOn = true; }
+#define AIRCON_FAN_OFF()        ATOMIC() { ((((configPage15.airConFanPol)==1)) ? AIRCON_FAN_PIN_HIGH() : AIRCON_FAN_PIN_LOW()); currentStatus.airconFanOn = false; }
 
 #define FAN_ON()                ATOMIC() { ((configPage6.fanInv) ? FAN_PIN_LOW() : FAN_PIN_HIGH()); }
 #define FAN_OFF()               ATOMIC() { ((configPage6.fanInv) ? FAN_PIN_HIGH() : FAN_PIN_LOW()); }
@@ -85,12 +86,12 @@ void wmiControl(void);
 
 #define WMI_TANK_IS_EMPTY() ((configPage10.wmiEmptyEnabled) ? ((configPage10.wmiEmptyPolarity) ? digitalRead(pinWMIEmpty) : !digitalRead(pinWMIEmpty)) : 1)
 
-extern volatile PORT_TYPE *vvt1_pin_port;
-extern volatile PINMASK_TYPE vvt1_pin_mask;
-extern volatile PORT_TYPE *vvt2_pin_port;
-extern volatile PINMASK_TYPE vvt2_pin_mask;
-extern volatile PORT_TYPE *fan_pin_port;
-extern volatile PINMASK_TYPE fan_pin_mask;
+extern PORT_TYPE vvt1_pin_port;
+extern PINMASK_TYPE vvt1_pin_mask;
+extern PORT_TYPE vvt2_pin_port;
+extern PINMASK_TYPE vvt2_pin_mask;
+extern PORT_TYPE fan_pin_port;
+extern PINMASK_TYPE fan_pin_mask;
 
 #if defined(PWM_FAN_AVAILABLE)//PWM fan not available on Arduino MEGA
 extern uint16_t fan_pwm_max_count; //Used for variable PWM frequency

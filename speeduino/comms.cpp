@@ -27,6 +27,8 @@ A full copy of the license may be found in the projects root directory
 #ifdef SD_LOGGING
   #include "SD_logger.h"
 #endif
+#include "units.h"
+#include "sensors.h"
 
 /** @defgroup group-serial-comms-impl Serial comms implementation
  * @{
@@ -361,7 +363,7 @@ static void generateLiveValues(uint16_t offset, uint16_t packetLength)
     currentStatus.secl = 0; 
   }
 
-  currentStatus.status2 ^= (-currentStatus.hasSync ^ currentStatus.status2) & (1U << BIT_STATUS2_SYNC); //Set the sync bit of the Spark variable to match the hasSync variable
+  currentStatus.hasFullSync = currentStatus.hasSync; //Set the sync bit of the Spark variable to match the hasSync variable
 
   serialPayload[0] = SERIAL_RC_OK;
   for(uint16_t x=0; x<packetLength; x++)
@@ -369,7 +371,7 @@ static void generateLiveValues(uint16_t offset, uint16_t packetLength)
     serialPayload[x+1U] = getTSLogEntry(offset+x); 
   }
   // Reset any flags that are being used to trigger page refreshes
-  BIT_CLEAR(currentStatus.status3, BIT_STATUS3_VSS_REFRESH);
+  currentStatus.vssUiRefresh = false;
 }
 
 /**
@@ -395,8 +397,8 @@ static void loadO2CalibrationChunk(uint16_t offset, uint16_t chunkSize)
     //As we're using an interpolated 2D table, we only need to store 32 values out of this 1024
     if( (x % 32U) == 0U )
     {
-      o2Calibration_values[offset/32U] = serialPayload[x+7U]; //O2 table stores 8 bit values
-      o2Calibration_bins[offset/32U]   = offset;
+      o2CalibrationTable.values[offset/32U] = serialPayload[x+7U]; //O2 table stores 8 bit values
+      o2CalibrationTable.axis[offset/32U]   = offset;
     }
 
     //Update the CRC
@@ -415,15 +417,15 @@ static void loadO2CalibrationChunk(uint16_t offset, uint16_t chunkSize)
 
 /**
  * @brief Convert 2 bytes into an offset temperature in degrees Celsius
- * @attention Returned value will be offset CALIBRATION_TEMPERATURE_OFFSET
+ * @attention Returned value will be in storage temperatures
  */
-static uint16_t toTemperature(byte lo, byte hi)
+static uint8_t toTemperature(byte lo, byte hi)
 {
   int16_t tempValue = (int16_t)(word(hi, lo)); //Combine the 2 bytes into a single, signed 16-bit value
   tempValue = tempValue / 10; //TS sends values multiplied by 10 so divide back to whole degrees. 
   tempValue = ((tempValue - 32) * 5) / 9; //Convert from F to C
   //Apply the temp offset and check that it results in all values being positive
-  return max( tempValue + CALIBRATION_TEMPERATURE_OFFSET, 0 );
+  return max( temperatureAddOffset(tempValue), (uint8_t)0U );
 }
 
 /**
@@ -434,15 +436,15 @@ static uint16_t toTemperature(byte lo, byte hi)
  * @param values The table values
  * @param bins The table bin values
  */
-static void processTemperatureCalibrationTableUpdate(uint16_t calibrationLength, uint8_t calibrationPage, uint16_t *values, uint16_t *bins)
+static void processTemperatureCalibrationTableUpdate(uint16_t calibrationLength, uint8_t calibrationPage, table2D_u16_u16_32 &table)
 {
   //Temperature calibrations are sent as 32 16-bit values
   if(calibrationLength == 64U)
   {
     for (uint16_t x = 0; x < 32U; x++)
     {
-      values[x] = toTemperature(serialPayload[(2U * x) + 7U], serialPayload[(2U * x) + 8U]);
-      bins[x] = (x * 33U); // 0*33=0 to 31*33=1023
+      table.values[x] = toTemperature(serialPayload[(2U * x) + 7U], serialPayload[(2U * x) + 8U]);
+      table.axis[x] = (x * 33U); // 0*33=0 to 31*33=1023
     }
     storeCalibrationCRC32(calibrationPage, CRC32_calibration.crc32(&serialPayload[7], 64));
     writeCalibrationPage(calibrationPage);
@@ -487,7 +489,7 @@ void serialReceive(void)
       legacySerialCommand();
       return;
     }
-    else if( (((highByte >= 'A') && (highByte <= 'z')) || (highByte == '?')) && (BIT_CHECK(currentStatus.status4, BIT_STATUS4_ALLOW_LEGACY_COMMS)) )
+    else if( (((highByte >= 'A') && (highByte <= 'z')) || (highByte == '?')) && (currentStatus.allowLegacyComms) )
     {
       //Handle legacy cases here
       legacySerialCommand();
@@ -524,7 +526,7 @@ void serialReceive(void)
         {
           //CRC is correct. Process the command
           processSerialCommand();
-          BIT_CLEAR(currentStatus.status4, BIT_STATUS4_ALLOW_LEGACY_COMMS); //Lock out legacy commands until next power cycle
+          currentStatus.allowLegacyComms = false; //Lock out legacy commands until next power cycle
         }
         else {
           //CRC Error. Need to send an error message
@@ -587,16 +589,16 @@ void processSerialCommand(void)
 
     case 'b': // New EEPROM burn command to only burn a single page at a time 
       if( (micros() > deferEEPROMWritesUntil)) { writeConfig(serialPayload[2]); } //Read the table number and perform burn. Note that byte 1 in the array is unused
-      else { BIT_SET(currentStatus.status4, BIT_STATUS4_BURNPENDING); }
+      else { currentStatus.burnPending = true; }
       
       sendReturnCodeMsg(SERIAL_RC_BURN_OK);
       break;
 
     case 'B': // Same as above, but for the comms compat mode. Slows down the burn rate and increases the defer time
-      BIT_SET(currentStatus.status4, BIT_STATUS4_COMMS_COMPAT); //Force the compat mode
+      currentStatus.commCompat = true; //Force the compat mode
       deferEEPROMWritesUntil += (EEPROM_DEFER_DELAY/4); //Add 25% more to the EEPROM defer time
       if( (micros() > deferEEPROMWritesUntil)) { writeConfig(serialPayload[2]); } //Read the table number and perform burn. Note that byte 1 in the array is unused
-      else { BIT_SET(currentStatus.status4, BIT_STATUS4_BURNPENDING); }
+      else { currentStatus.burnPending = true; }
       
       sendReturnCodeMsg(SERIAL_RC_BURN_OK);
       break;
@@ -779,7 +781,7 @@ void processSerialCommand(void)
           
           serialPayload[0] = SERIAL_RC_OK;
 
-          serialPayload[1] = currentStatus.TS_SD_Status;
+          serialPayload[1] = buildSdCardStatus(currentStatus);
           serialPayload[2] = 0; //Error code
  
           //Sector size = 512
@@ -897,11 +899,11 @@ void processSerialCommand(void)
       }
       else if(cmd == IAT_CALIBRATION_PAGE)
       {
-        processTemperatureCalibrationTableUpdate(calibrationLength, IAT_CALIBRATION_PAGE, iatCalibration_values, iatCalibration_bins);
+        processTemperatureCalibrationTableUpdate(calibrationLength, IAT_CALIBRATION_PAGE, iatCalibrationTable);
       }
       else if(cmd == CLT_CALIBRATION_PAGE)
       {
-        processTemperatureCalibrationTableUpdate(calibrationLength, CLT_CALIBRATION_PAGE, cltCalibration_values, cltCalibration_bins);
+        processTemperatureCalibrationTableUpdate(calibrationLength, CLT_CALIBRATION_PAGE, cltCalibrationTable);
       }
       else
       {
@@ -1073,7 +1075,7 @@ void processSerialCommand(void)
 void sendToothLog(void)
 {
   //We need TOOTH_LOG_SIZE number of records to send to TunerStudio. If there aren't that many in the buffer then we just return and wait for the next call
-  if (BIT_CHECK(currentStatus.status1, BIT_STATUS1_TOOTHLOG1READY) == false) 
+  if (currentStatus.isToothLog1Full == false) 
   {
     //If the buffer is not yet full but TS has timed out, pad the rest of the buffer with 0s
     while(toothHistoryIndex < TOOTH_LOG_SIZE)
@@ -1110,7 +1112,7 @@ void sendToothLog(void)
     uint32_t transmitted = serialWrite(toothHistory[logItemsTransmitted]);
     CRC32_val = CRC32_serial.crc32_upd((const byte*)&transmitted, sizeof(transmitted), false);
   }
-  BIT_CLEAR(currentStatus.status1, BIT_STATUS1_TOOTHLOG1READY);
+  currentStatus.isToothLog1Full = false;
   serialStatusFlag = SERIAL_INACTIVE;
   toothHistoryIndex = 0;
   logItemsTransmitted = 0;
@@ -1124,7 +1126,7 @@ void sendToothLog(void)
 
 void sendCompositeLog(void)
 {
-  if ( BIT_CHECK(currentStatus.status1, BIT_STATUS1_TOOTHLOG1READY) == false )
+  if ( currentStatus.isToothLog1Full == false )
   {
     //If the buffer is not yet full but TS has timed out, pad the rest of the buffer with 0s
     while(toothHistoryIndex < TOOTH_LOG_SIZE)
@@ -1166,7 +1168,7 @@ void sendCompositeLog(void)
     writeByteReliableBlocking(compositeLogHistory[logItemsTransmitted]);
     CRC32_val = CRC32_serial.crc32_upd((const byte*)&compositeLogHistory[logItemsTransmitted], sizeof(compositeLogHistory[logItemsTransmitted]), false);
   }
-  BIT_CLEAR(currentStatus.status1, BIT_STATUS1_TOOTHLOG1READY);
+  currentStatus.isToothLog1Full = false;
   toothHistoryIndex = 0;
   serialStatusFlag = SERIAL_INACTIVE;
   logItemsTransmitted = 0;

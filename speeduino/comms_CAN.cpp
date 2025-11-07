@@ -13,6 +13,7 @@ This is for handling the data broadcasted to various CAN dashes and instrument c
 #include "comms_CAN.h"
 #include "utilities.h"
 #include "maths.h"
+#include "units.h"
 
 CAN_message_t inMsg;
 CAN_message_t outMsg;
@@ -136,7 +137,7 @@ void receiveCANwbo()
     outMsg.flags.extended = 1;
     outMsg.len = 2;
     outMsg.buf[0] = currentStatus.battery10; // We don't do any conversion since factor is 0.1 and speeduino value is x10
-    outMsg.buf[1] = BIT_CHECK(currentStatus.engine, BIT_ENGINE_RUN) ? 0x1 : 0x0; // Enable heater once engine is running (ie. above cranking rpm), this condition can be changed to CLT above certain temp and so on.
+    outMsg.buf[1] = currentStatus.engineIsRunning ? 0x1 : 0x0; // Enable heater once engine is running (ie. above cranking rpm), this condition can be changed to CLT above certain temp and so on.
     Can0.write(outMsg);
     outMsg.flags.extended = 0; //Make sure to set this back to standard to avoid future problems
     if ((inMsg.id == 0x190 || inMsg.id == 0x192))
@@ -468,7 +469,7 @@ void obd_response(uint8_t PIDmode, uint8_t requestedPIDlow, uint8_t requestedPID
         outMsg.buf[0] =  0x03;                 // sending 3 bytes
         outMsg.buf[1] =  0x41;                 // Same as query, except that 40h is added to the mode value. So:41h = show current data ,42h = freeze frame ,etc.
         outMsg.buf[2] =  0x05;                 // pid code
-        outMsg.buf[3] =  (byte)(currentStatus.coolant + CALIBRATION_TEMPERATURE_OFFSET);   //the data value A
+        outMsg.buf[3] =  temperatureAddOffset(currentStatus.coolant);   //the data value A
         outMsg.buf[4] =  0x00;                 //the data value B which is 0 as unused
         outMsg.buf[5] =  0x00; 
         outMsg.buf[6] =  0x00; 
@@ -542,7 +543,7 @@ void obd_response(uint8_t PIDmode, uint8_t requestedPIDlow, uint8_t requestedPID
         outMsg.buf[0] =  0x03;                                                         // sending 3 bytes
         outMsg.buf[1] =  0x41;                                                         // Same as query, except that 40h is added to the mode value. So:41h = show current data ,42h = freeze frame ,etc.
         outMsg.buf[2] =  0x0F;                                                         // pid code
-        outMsg.buf[3] =  (byte)(currentStatus.IAT + CALIBRATION_TEMPERATURE_OFFSET);   // A
+        outMsg.buf[3] =  temperatureAddOffset(currentStatus.IAT);   // A
         outMsg.buf[4] =  0x00;                                                         // B
         outMsg.buf[5] =  0x00; 
         outMsg.buf[6] =  0x00; 
@@ -686,7 +687,7 @@ void obd_response(uint8_t PIDmode, uint8_t requestedPIDlow, uint8_t requestedPID
       case 70:        //PID-0x46 Ambient Air Temperature , range is -40 to 215 deg C , formula == A-40
         uint16_t temp_ambientair;
         temp_ambientair = 11;              // TEST VALUE !!!!!!!!!!
-        obdcalcA = temp_ambientair + 40 ;    // maybe later will be (byte)(currentStatus.AAT + CALIBRATION_TEMPERATURE_OFFSET)
+        obdcalcA = temperatureAddOffset(temp_ambientair);
         outMsg.buf[0] =  0x03;             // sending 3 byte
         outMsg.buf[1] =  0x41;             // Same as query, except that 40h is added to the mode value. So:41h = show current data ,42h = freeze frame ,etc.
         outMsg.buf[2] =  0x46;             // pid code
@@ -714,7 +715,7 @@ void obd_response(uint8_t PIDmode, uint8_t requestedPIDlow, uint8_t requestedPID
       case 92:        //PID-0x5C Engine oil temperature , range is -40 to 210 deg C , formula == A-40
         uint16_t temp_engineoiltemp;
         temp_engineoiltemp = 40;              // TEST VALUE !!!!!!!!!! 
-        obdcalcA = temp_engineoiltemp+40 ;    // maybe later will be (byte)(currentStatus.EOT + CALIBRATION_TEMPERATURE_OFFSET)
+        obdcalcA = temperatureAddOffset(temp_engineoiltemp);
         outMsg.buf[0] =  0x03;                // sending 3 byte
         outMsg.buf[1] =  0x41;                // Same as query, except that 40h is added to the mode value. So:41h = show current data ,42h = freeze frame ,etc. 
         outMsg.buf[2] =  0x5C;                // pid code

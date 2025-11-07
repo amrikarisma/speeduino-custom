@@ -79,93 +79,6 @@ using byte = uint8_t;
 #define PROTECT_CUT_IGN     1
 #define PROTECT_CUT_FUEL    2
 #define PROTECT_CUT_BOTH    3
-#define PROTECT_IO_ERROR    7
-
-#define AE_MODE_TPS         0
-#define AE_MODE_MAP         1
-
-#define AE_MODE_MULTIPLIER  0
-#define AE_MODE_ADDER       1
-
-#define KNOCK_MODE_OFF      0U
-#define KNOCK_MODE_DIGITAL  1U
-#define KNOCK_MODE_ANALOG   2U
-
-#define KNOCK_TRIGGER_HIGH  0
-#define KNOCK_TRIGGER_LOW   1
-
-#define FUEL2_MODE_OFF      0U
-#define FUEL2_MODE_MULTIPLY 1U
-#define FUEL2_MODE_ADD      2U
-#define FUEL2_MODE_CONDITIONAL_SWITCH   3U
-#define FUEL2_MODE_INPUT_SWITCH 4U
-
-#define SPARK2_MODE_OFF      0U
-#define SPARK2_MODE_MULTIPLY 1U
-#define SPARK2_MODE_ADD      2U
-#define SPARK2_MODE_CONDITIONAL_SWITCH   3U
-#define SPARK2_MODE_INPUT_SWITCH 4U
-
-#define FUEL2_CONDITION_RPM 0U
-#define FUEL2_CONDITION_MAP 1U
-#define FUEL2_CONDITION_TPS 2U
-#define FUEL2_CONDITION_ETH 3U
-
-#define SPARK2_CONDITION_RPM 0U
-#define SPARK2_CONDITION_MAP 1U
-#define SPARK2_CONDITION_TPS 2U
-#define SPARK2_CONDITION_ETH 3U
-
-#define RESET_CONTROL_DISABLED             0U
-#define RESET_CONTROL_PREVENT_WHEN_RUNNING 1U
-#define RESET_CONTROL_PREVENT_ALWAYS       2U
-#define RESET_CONTROL_SERIAL_COMMAND       3U
-
-#define SEC_TRIGGER_SINGLE  0
-#define SEC_TRIGGER_4_1     1
-#define SEC_TRIGGER_POLL    2
-#define SEC_TRIGGER_5_3_2   3
-#define SEC_TRIGGER_TOYOTA_3  4
-
-#define ROTARY_IGN_FC       0
-#define ROTARY_IGN_FD       1
-#define ROTARY_IGN_RX8      2
-
-#define BOOST_MODE_SIMPLE   0
-#define BOOST_MODE_FULL     1
-
-#define EN_BOOST_CONTROL_BARO   0
-#define EN_BOOST_CONTROL_FIXED  1
-
-#define WMI_MODE_SIMPLE       0
-#define WMI_MODE_PROPORTIONAL 1
-#define WMI_MODE_OPENLOOP     2
-#define WMI_MODE_CLOSEDLOOP   3
-
-#define HARD_CUT_FULL       0
-#define HARD_CUT_ROLLING    1
-
-#define EVEN_FIRE           0
-#define ODD_FIRE            1
-
-#define EGO_ALGORITHM_SIMPLE   0U
-#define EGO_ALGORITHM_INVALID1 1U
-#define EGO_ALGORITHM_PID      2U
-#define EGO_ALGORITHM_NONE     3U
-
-#define STAGING_MODE_TABLE  0
-#define STAGING_MODE_AUTO   1
-
-#define NITROUS_OFF         0
-#define NITROUS_STAGE1      1
-#define NITROUS_STAGE2      2
-#define NITROUS_BOTH        3
-
-#define PROTECT_CUT_OFF     0
-#define PROTECT_CUT_IGN     1
-#define PROTECT_CUT_FUEL    2
-#define PROTECT_CUT_BOTH    3
-#define PROTECT_IO_ERROR    7
 
 #define AE_MODE_TPS         0
 #define AE_MODE_MAP         1
@@ -252,7 +165,7 @@ struct config2 {
   byte aeColdPct;  //AE cold clt modifier %
   byte aeColdTaperMin; //AE cold modifier, taper start temp (full modifier, was ASE in early versions)
   byte aeMode : 2;      /**< Acceleration Enrichment mode. 0 = TPS, 1 = MAP. Values 2 and 3 reserved for potential future use (ie blended TPS / MAP) */
-  byte battVCorMode : 1;
+  byte unused2_3_3 : 1; //Previously used for battery correction type (open vs whole PW)
   byte SoftLimitMode : 1;
   byte useTachoSweep : 1;
   byte aeApplyMode : 1; ///< Acceleration enrichment calc mode: 0 = Multiply | 1 = Add (AE_MODE_ADDER)
@@ -571,7 +484,7 @@ struct config6 {
   byte lnchSoftLim;
   int8_t lnchRetard; //Allow for negative advance value (ATDC)
   byte lnchHardLim;
-  byte lnchFuelAdd;
+  int8_t lnchFuelAdd; //Note signed. 
 
   //PID values for idle needed to go here as out of room in the idle page
   byte idleKP;

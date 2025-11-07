@@ -36,44 +36,6 @@
 #pragma GCC optimize ("Os") 
 #endif
 
-#if !defined(UNIT_TEST)
-static inline 
-#endif
-void construct2dTables(void) {
-  //Repoint the 2D table structs to the config pages that were just loaded
-  construct2dTable(taeTable,                  _countof(configPage4.taeValues),                  configPage4.taeValues,                  configPage4.taeBins);
-  construct2dTable(maeTable,                  _countof(configPage4.maeRates),                   configPage4.maeRates,                   configPage4.maeBins);
-  construct2dTable(WUETable,                  _countof(configPage2.wueValues),                  configPage2.wueValues,                  configPage4.wueBins);
-  construct2dTable(ASETable,                  _countof(configPage2.asePct),                     configPage2.asePct,                     configPage2.aseBins);
-  construct2dTable(ASECountTable,             _countof(configPage2.aseCount),                   configPage2.aseCount,                   configPage2.aseBins);
-  construct2dTable(PrimingPulseTable,         _countof(configPage2.primePulse),                 configPage2.primePulse,                 configPage2.primeBins);
-  construct2dTable(crankingEnrichTable,       _countof(configPage10.crankingEnrichValues),      configPage10.crankingEnrichValues,      configPage10.crankingEnrichBins);
-  construct2dTable(dwellVCorrectionTable,     _countof(configPage4.dwellCorrectionValues),      configPage4.dwellCorrectionValues,      configPage6.voltageCorrectionBins);
-  construct2dTable(injectorVCorrectionTable,  _countof(configPage6.injVoltageCorrectionValues), configPage6.injVoltageCorrectionValues, configPage6.voltageCorrectionBins);
-  construct2dTable(IATDensityCorrectionTable, _countof(configPage6.airDenRates),                configPage6.airDenRates,                configPage6.airDenBins);
-  construct2dTable(baroFuelTable,             _countof(configPage4.baroFuelValues),             configPage4.baroFuelValues,             configPage4.baroFuelBins);
-  construct2dTable(IATRetardTable,            _countof(configPage4.iatRetValues),               configPage4.iatRetValues,               configPage4.iatRetBins);
-  construct2dTable(CLTAdvanceTable,           _countof(configPage4.cltAdvValues),               configPage4.cltAdvValues,               configPage4.cltAdvBins);
-  construct2dTable(idleTargetTable,           _countof(configPage6.iacCLValues),                configPage6.iacCLValues,                configPage6.iacBins);
-  construct2dTable(idleAdvanceTable,          _countof(configPage4.idleAdvValues),              configPage4.idleAdvValues,              configPage4.idleAdvBins);
-  construct2dTable(rotarySplitTable,          _countof(configPage10.rotarySplitValues),         configPage10.rotarySplitValues,         configPage10.rotarySplitBins);
-  construct2dTable(flexFuelTable,             _countof(configPage10.flexFuelAdj),               configPage10.flexFuelAdj,               configPage10.flexFuelBins);
-  construct2dTable(flexAdvTable,              _countof(configPage10.flexAdvAdj),                configPage10.flexAdvAdj,                configPage10.flexAdvBins);
-  construct2dTable(fuelTempTable,             _countof(configPage10.fuelTempValues),            configPage10.fuelTempValues,            configPage10.fuelTempBins);
-  construct2dTable(oilPressureProtectTable,   _countof(configPage10.oilPressureProtMins),       configPage10.oilPressureProtMins,       configPage10.oilPressureProtRPM);
-  construct2dTable(coolantProtectTable,       _countof(configPage9.coolantProtRPM),             configPage9.coolantProtRPM,             configPage9.coolantProtTemp);
-  construct2dTable(fanPWMTable,               _countof(configPage9.PWMFanDuty),                 configPage9.PWMFanDuty,                 configPage6.fanPWMBins);
-  construct2dTable(wmiAdvTable,               _countof(configPage10.wmiAdvAdj),                 configPage10.wmiAdvAdj,                 configPage10.wmiAdvBins);
-  construct2dTable(rollingCutTable,           _countof(configPage15.rollingProtCutPercent),     configPage15.rollingProtCutPercent,     configPage15.rollingProtRPMDelta);
-  construct2dTable(injectorAngleTable,        _countof(configPage2.injAng),                     configPage2.injAng,                     configPage2.injAngRPM);
-  construct2dTable(flexBoostTable,            _countof(configPage10.flexBoostAdj),              configPage10.flexBoostAdj,              configPage10.flexBoostBins);
-  construct2dTable(knockWindowStartTable,      _countof(configPage10.knock_window_angle),        configPage10.knock_window_angle, configPage10.knock_window_rpms);
-  construct2dTable(knockWindowDurationTable,   _countof(configPage10.knock_window_dur),          configPage10.knock_window_dur,   configPage10.knock_window_rpms);
-  construct2dTable(cltCalibrationTable,       _countof(cltCalibration_values), cltCalibration_values, cltCalibration_bins);
-  construct2dTable(iatCalibrationTable,       _countof(iatCalibration_values), iatCalibration_values, iatCalibration_bins);
-  construct2dTable(o2CalibrationTable,        _countof(o2Calibration_values),  o2Calibration_values,  o2Calibration_bins);
-}
-
 /** Initialise Speeduino for the main loop.
  * Top level init entry point for all initialisations:
  * - Initialise and set sizes of 3D tables
@@ -169,10 +131,7 @@ void initialiseAll(void)
     teensy41_customSerialBegin();
 #endif
     pPrimarySerial = &Serial; //Default to standard Serial interface
-    BIT_SET(currentStatus.status4, BIT_STATUS4_ALLOW_LEGACY_COMMS); //Flag legacy comms as being allowed on startup
-
-    //Repoint the 2D table structs to the config pages that were just loaded
-    construct2dTables();
+    currentStatus.allowLegacyComms = true; //Flag legacy comms as being allowed on startup
     
     //Setup the calibration tables
     loadCalibration();   
@@ -193,9 +152,7 @@ void initialiseAll(void)
     #endif
 
     //Must come after setPinMapping() as secondary serial can be changed on a per board basis
-    #if defined(secondarySerial_AVAILABLE)
-      if (configPage9.enable_secondarySerial == 1) { secondarySerial.begin(115200); }
-    #endif
+    if (configPage9.enable_secondarySerial == 1) { secondarySerial.begin(115200); }
 
     //End all coil charges to ensure no stray sparks on startup
     endCoil1Charge();
@@ -239,7 +196,7 @@ void initialiseAll(void)
     initialiseAirCon();
     initialiseAuxPWM();
     initialiseCorrections();
-    BIT_CLEAR(currentStatus.engineProtectStatus, PROTECT_IO_ERROR); //Clear the I/O error bit. The bit will be set in initialiseADC() if there is problem in there.
+    currentStatus.engineProtectIoError = false; //Clear the I/O error bit. The bit will be set in initialiseADC() if there is problem in there.
     initialiseADC();
     initialiseMAPBaro();
     initialiseProgrammableIO();
@@ -299,7 +256,7 @@ void initialiseAll(void)
     //These assignments are based on the Arduino Mega AND VARY BETWEEN BOARDS. Please confirm the board you are using and update accordingly.
     currentStatus.RPM = 0;
     currentStatus.hasSync = false;
-    BIT_CLEAR(currentStatus.status3, BIT_STATUS3_HALFSYNC);
+    currentStatus.halfSync = false;
     currentStatus.runSecs = 0;
     currentStatus.secl = 0;
     //currentStatus.seclx10 = 0;
@@ -309,10 +266,9 @@ void initialiseAll(void)
     currentStatus.launchingHard = false;
     currentStatus.crankRPM = ((unsigned int)configPage4.crankRPM * 10); //Crank RPM limit (Saves us calculating this over and over again. It's updated once per second in timers.ino)
     currentStatus.fuelPumpOn = false;
-    currentStatus.engineProtectStatus = 0;
+    resetEngineProtect(currentStatus);
     triggerFilterTime = 0; //Trigger filter time is the shortest possible time (in uS) that there can be between crank teeth (ie at max RPM). Any pulses that occur faster than this time will be discarded as noise. This is simply a default value, the actual values are set in the setup() functions of each decoder
     dwellLimit_uS = (1000 * configPage4.dwellLimit);
-    currentStatus.nChannels = ((uint8_t)INJ_CHANNELS << 4) + IGN_CHANNELS; //First 4 bits store the number of injection channels, 2nd 4 store the number of ignition channels
     fpPrimeTime = 0;
     ms_counter = 0;
     fixedCrankingOverride = 0;
@@ -335,7 +291,7 @@ void initialiseAll(void)
     }
 
     //Initial values for loop times
-    currentLoopTime = micros_safe();
+    currentLoopTime = micros();
     mainLoopCount = 0;
 
     if(configPage2.divider == 0) { currentStatus.nSquirts = 2; } //Safety check.
@@ -864,7 +820,7 @@ void initialiseAll(void)
         break;
     }
 
-    currentStatus.status3 |= currentStatus.nSquirts << BIT_STATUS3_NSQUIRTS1; //Top 3 bits of the status3 variable are the number of squirts. This must be done after the above section due to nSquirts being forced to 1 for sequential
+    currentStatus.nSquirtsStatus = currentStatus.nSquirts; //Top 3 bits of the status3 variable are the number of squirts. This must be done after the above section due to nSquirts being forced to 1 for sequential
     
     //Special case:
     //3 or 5 squirts per cycle MUST be tracked over 720 degrees. This is because the angles for them (Eg 720/3=240) are not evenly divisible into 360
@@ -1628,6 +1584,7 @@ void setPinMapping(byte boardID)
       pinLaunch = 12; //Can be overwritten below
       pinFlex = 3; // Flex sensor (Must be external interrupt enabled)
       pinResetControl = 39; //Reset control output
+      pinVSS = 2;
       #endif
       //This is NOT correct. It has not yet been tested with this board
       #if defined(CORE_TEENSY35)
@@ -1786,6 +1743,58 @@ void setPinMapping(byte boardID)
       pinFlex = 2; // Flex sensor (Must be external interrupt enabled)
       pinResetControl = 26; //Reset control output
 
+    #endif
+      break;
+
+    case 14:
+    // Pin mappings for the Levin board
+    #if defined(STM32F407xx)
+      pinInjector1 = PB15;     // Output pin injector 1
+      pinInjector2 = PA8;      // Output pin injector 2
+      pinInjector3 = PB13;     // Output pin injector 3
+      pinInjector4 = PB14;     // Output pin injector 4
+      pinInjector5 = PE13;     // Output pin injector 5
+      pinInjector6 = PB12;     // Output pin injector 6
+      pinInjector7 = PE7;      // Output pin injector 7
+      pinInjector8 = PE10;     // Output pin injector 8
+      pinCoil1 = PC13;         // Pin for coil 1
+      pinCoil2 = PE6;          // Pin for coil 2
+      pinCoil3 = PE5;          // Pin for coil 3
+      pinCoil4 = PE4;          // Pin for coil 4
+      pinCoil5 = PE3;          // Pin for coil 5
+      pinCoil6 = PE2;          // Pin for coil 6
+      pinCoil7 = PB9;          // Pin for coil 7
+      pinCoil8 = PD12;         // Pin for coil 8
+      pinTrigger = PD3;        // The CAS pin
+      pinTrigger2 = PD4;       // The Cam Sensor pin
+      pinTPS = PA2;            // TPS input pin
+      pinMAP = PA3;            // MAP sensor pin
+      pinEMAP = PC5;           // EMAP sensor pin (placeholder)
+      pinIAT = PA0;            // IAT sensor pin
+      pinCLT = PA1;            // CLS sensor pin
+      pinO2 = PB0;             // O2 Sensor pin
+      pinBat = PA4;            // Battery reference voltage pin
+      pinBaro = PA5;           // Baro sensor pin
+      pinDisplayReset = PE12;  // OLED reset pin (placeholder)
+      pinTachOut = PE8;        // Tacho output pin  (Goes to UNL2803)
+      pinIdle1 = PD10;         // ICV pin1  (Goes to UNL2803)
+      pinIdle2 = PD9;          // ICV pin3  (Goes to UNL2803)
+      pinBoost = PD8;          // Boost control
+      pinVVT_1 = PD11;         // VVT1 output (intake vanos)
+      pinVVT_2 = PC6;          // VVT2 output (exhaust vanos)
+      pinFuelPump = PE11;      // Fuel pump output  (Goes to UNL2803)
+      pinStepperDir = PB10;    // Stepper valve isn't used with these
+      pinStepperStep = PB11;   // Stepper valve isn't used with these
+      pinStepperEnable = PA15; // Stepper valve isn't used with these
+      pinFan = PE9;            // Pin for the fan output (Goes to UNL2803)
+      pinLaunch = PB8;         // Launch control pin
+      pinFlex = PD7;           // Flex sensor
+      pinResetControl = PB7;   // Reset control output
+      pinVSS = PB6;            // VSS input pin
+      pinWMIEmpty = PA6;       //(placeholder)
+      pinWMIIndicator = PC3;   //(placeholder)
+      pinWMIEnabled = PE15;    //(placeholder)
+      pinIdleUp = PC7;         //(placeholder)
     #endif
       break;
 
@@ -2058,6 +2067,7 @@ void setPinMapping(byte boardID)
       pinSpareLOut4 = 29; //low current output spare4
       pinFan = 24; //Pin for the fan output
       pinResetControl = 46; //Reset control output PLACEHOLDER value for now
+      pinVSS = 2;
     #endif
       break;
 
@@ -2302,6 +2312,11 @@ void setPinMapping(byte boardID)
       pinSpareLOut4 = 29; //low current output spare4
       pinFan = 25; //Pin for the fan output
       pinResetControl = 46; //Reset control output PLACEHOLDER value for now
+      pinVSS = 22;
+
+      pinWMIEmpty = 23; //Spare digital input
+      pinWMIIndicator = pinSpareLOut2; //Spare output
+      pinWMIEnabled = pinSpareLOut1; //Spare output
 
       //CS pin number is now set in a compile flag. 
       // #ifdef USE_SPI_EEPROM
@@ -2319,12 +2334,6 @@ void setPinMapping(byte boardID)
       #endif
 
       #if defined(CORE_TEENSY41)
-        pinTPS = A17; //TPS input pin
-        pinIAT = A14; //IAT sensor pin
-        pinCLT = A15; //CLS sensor pin
-        pinO2 = A16; //O2 Sensor pin
-        pinBat = A3; //Battery reference voltage pin. Needs Alpha4+
-
         //New pins for the actual T4.1 version of the Dropbear
         pinBaro = A4; 
         pinMAP = A5;
@@ -2340,11 +2349,14 @@ void setPinMapping(byte boardID)
 
         pinTrigger = 20; //The CAS pin
         pinTrigger2 = 21; //The Cam Sensor pin
+        pinTrigger3 = 34; //Uses one of the protected spare digital inputs.
 
         pinFuelPump = 5; //Fuel pump output
         pinTachOut = 0; //Tacho output pin
 
         pinResetControl = 49; //PLaceholder only. Cannot use 42-47 as these are the SD card
+        pinWMIEmpty = 35; //Spare digital input
+        pinVSS = 34;
 
         //CS pin number is now set in a compile flag. 
         // #ifdef USE_SPI_EEPROM
@@ -3603,6 +3615,24 @@ void initialiseTriggers(void)
       else { primaryTriggerEdge = FALLING; }
       
       attachInterrupt(triggerInterrupt, triggerHandler, primaryTriggerEdge);
+      break;
+
+      case DECODER_FORD_TFI:
+      // Ford TFI
+      triggerSetup_FordTFI();
+      triggerHandler = triggerPri_FordTFI;
+      triggerSecondaryHandler = triggerSec_FordTFI;
+      getRPM = getRPM_FordTFI;
+      getCrankAngle = getCrankAngle_FordTFI;
+      triggerSetEndTeeth = triggerSetEndTeeth_FordTFI;
+
+      if(configPage4.TrigEdge == 0) { primaryTriggerEdge = RISING; } // Attach the crank trigger wheel interrupt (Hall sensor drags to ground when triggering)
+      else { primaryTriggerEdge = FALLING; }
+      if(configPage4.TrigEdgeSec == 0) { secondaryTriggerEdge = RISING; }
+      else { secondaryTriggerEdge = FALLING; }
+
+      attachInterrupt(triggerInterrupt, triggerHandler, primaryTriggerEdge);
+      attachInterrupt(triggerInterrupt2, triggerSecondaryHandler, secondaryTriggerEdge);
       break;
 
 
