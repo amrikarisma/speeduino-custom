@@ -9,7 +9,7 @@ A full copy of the license may be found in the projects root directory
 #include "src/PID_v1/PID_v1.h"
 #include "decoders.h"
 #include "timers.h"
-#include "utilities.h"
+#include "preprocessor.h"
 #include "units.h"
 
 static long vvt1_pwm_value;
@@ -28,26 +28,26 @@ volatile char nextVVT;
 byte boostCounter;
 byte vvtCounter;
 
-PORT_TYPE boost_pin_port;
-PINMASK_TYPE boost_pin_mask;
-PORT_TYPE n2o_stage1_pin_port;
-PINMASK_TYPE n2o_stage1_pin_mask;
-PORT_TYPE n2o_stage2_pin_port;
-PINMASK_TYPE n2o_stage2_pin_mask;
-PORT_TYPE n2o_arming_pin_port;
-PINMASK_TYPE n2o_arming_pin_mask;
-PORT_TYPE aircon_comp_pin_port;
-PINMASK_TYPE aircon_comp_pin_mask;
-PORT_TYPE aircon_fan_pin_port;
-PINMASK_TYPE aircon_fan_pin_mask;
-PORT_TYPE aircon_req_pin_port;
-PINMASK_TYPE aircon_req_pin_mask;
-PORT_TYPE vvt1_pin_port;
-PINMASK_TYPE vvt1_pin_mask;
-PORT_TYPE vvt2_pin_port;
-PINMASK_TYPE vvt2_pin_mask;
-PORT_TYPE fan_pin_port;
-PINMASK_TYPE fan_pin_mask;
+port_register_t boost_pin_port;
+pin_mask_t boost_pin_mask;
+port_register_t n2o_stage1_pin_port;
+pin_mask_t n2o_stage1_pin_mask;
+port_register_t n2o_stage2_pin_port;
+pin_mask_t n2o_stage2_pin_mask;
+port_register_t n2o_arming_pin_port;
+pin_mask_t n2o_arming_pin_mask;
+port_register_t aircon_comp_pin_port;
+pin_mask_t aircon_comp_pin_mask;
+port_register_t aircon_fan_pin_port;
+pin_mask_t aircon_fan_pin_mask;
+port_register_t aircon_req_pin_port;
+pin_mask_t aircon_req_pin_mask;
+port_register_t vvt1_pin_port;
+pin_mask_t vvt1_pin_mask;
+port_register_t vvt2_pin_port;
+pin_mask_t vvt2_pin_mask;
+port_register_t fan_pin_port;
+pin_mask_t fan_pin_mask;
 
 #if defined(PWM_FAN_AVAILABLE)//PWM fan not available on Arduino MEGA
 volatile bool fan_pwm_state;
@@ -687,7 +687,7 @@ void boostControl(void)
     if(configPage4.boostType == OPEN_LOOP_BOOST)
     {
       //Open loop
-      if ( (configPage9.boostByGearEnabled > 0) && (configPage2.vssMode > 1) ){ boostByGear(); }
+      if ( (configPage9.boostByGearEnabled > 0) && isExternalVssMode(configPage2) ){ boostByGear(); }
       else{ currentStatus.boostDuty = get3DTableValue(&boostTable, (currentStatus.TPS * 2U), currentStatus.RPM) * 2 * 100; }
 
       if(currentStatus.boostDuty > 10000) { currentStatus.boostDuty = 10000; } //Safety check
@@ -701,7 +701,7 @@ void boostControl(void)
     {
       if( (boostCounter & 7) == 1) 
       { 
-        if ( (configPage9.boostByGearEnabled > 0) && (configPage2.vssMode > 1) ){ boostByGear(); }
+        if ( (configPage9.boostByGearEnabled > 0) && isExternalVssMode(configPage2) ){ boostByGear(); }
         else{ currentStatus.boostTarget = get3DTableValue(&boostTable, (currentStatus.TPS * 2U), currentStatus.RPM) << 1; } //Boost target table is in kpa and divided by 2
 
         //If flex fuel is enabled, there can be an adder to the boost target based on ethanol content

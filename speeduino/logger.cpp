@@ -4,8 +4,9 @@
 #include "init.h"
 #include "maths.h"
 #include "utilities.h"
-#include BOARD_H 
+#include "preprocessor.h"
 #include "units.h"
+#include "board_definition.h" 
 
 static byte setStatusBit(byte status, uint8_t index, bool bit)
 {
@@ -53,7 +54,7 @@ static byte buildStatus2(const statuses &current)
     false, // Unused
     false, // Unused
     current.idleOn,
-    current.hasFullSync,
+    getSyncStatus()==SyncStatus::Full,
   };
   return setStatusBits(0U, bits);
 }
@@ -65,7 +66,7 @@ static byte buildStatus3(const statuses &current)
     current.nitrousActive,
     current.secondFuelTableActive,
     current.vssUiRefresh,
-    current.halfSync,
+    getSyncStatus()==SyncStatus::Partial,
   };
   byte status3 = setStatusBits(0U, bits);
   status3 |= (current.nSquirtsStatus << 5U); // Uses bits 5-7
@@ -125,12 +126,12 @@ byte buildSdCardStatus(const statuses &current)
 {
   bool bits[] = {
     current.sdCardPresent,
-    current.sdCardType,
+    current.sdCardType==1U,
     current.sdCardReady,
     current.sdCardLogging,
     current.sdCardError,
     false, // Unused
-    current.sdCardFS,
+    current.sdCardFS==1U,
     current.sdCardUnused,
   };
   return setStatusBits(0, bits);
@@ -515,7 +516,6 @@ float getReadableFloatLogEntry(uint16_t logIndex)
 uint8_t getLegacySecondarySerialLogEntry(uint16_t byteNum)
 {
   uint8_t statusValue = 0;
-  currentStatus.hasFullSync = currentStatus.hasSync; //Set the sync bit of the Spark variable to match the hasSync variable
 
   switch(byteNum)
   {

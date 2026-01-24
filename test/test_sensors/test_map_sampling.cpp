@@ -4,6 +4,9 @@
 #include "config_pages.h"
 #include "statuses.h"
 #include "globals.h"
+#include "decoders.h"
+
+extern void setSyncStatus(SyncStatus syncStatus);
 
 static void test_instantaneous(void) {
   extern bool instanteneousMAPReading(void);
@@ -18,7 +21,7 @@ static void enable_cycle_average(statuses &current, config2 &page2) {
   current.RPMdiv100 = 43;
   page2.mapSwitchPoint = 15; 
   current.startRevolutions = 55;
-  current.hasSync = true;
+  setSyncStatus(SyncStatus::Full);
 }
 
 static void test_canUseCycleAverge(void) {
@@ -28,9 +31,9 @@ static void test_canUseCycleAverge(void) {
 
   TEST_ASSERT_TRUE(canUseCycleAverage(current, page2));
 
-  current.hasSync = false;
+  setSyncStatus(SyncStatus::None);
   TEST_ASSERT_FALSE(canUseCycleAverage(current, page2));
-  current.hasSync = true;
+  setSyncStatus(SyncStatus::Full);
 
   current.startRevolutions = 1;
   TEST_ASSERT_FALSE(canUseCycleAverage(current, page2));
@@ -63,7 +66,7 @@ static void test_cycleAverageMAPReading_fallback_instantaneous(void) {
   cycleAverageMAPReading_test_data test_data;
   setup_cycle_average(test_data);
 
-  test_data.current.hasSync = false;
+  setSyncStatus(SyncStatus::None);
   test_data.sensorReadings.mapADC = 0x1234;
   test_data.sensorReadings.emapADC = 0x1234;
 
@@ -150,6 +153,7 @@ struct cycleMinmumMAPReading_test_data {
 
 static void setup_cycle_minimum(cycleMinmumMAPReading_test_data &test_data) {
   test_data.current.RPMdiv100 = 43;
+  test_data.current.startRevolutions = 0U;
   test_data.page2.mapSwitchPoint = 15; 
   test_data.cycle_min.cycleStartIndex = 0;
   test_data.cycle_min.mapMinimum = UINT16_MAX;
@@ -211,7 +215,7 @@ static void enable_event_average(statuses &current, config2 &page2) {
   current.RPMdiv100 = 43;
   page2.mapSwitchPoint = 15; 
   current.startRevolutions = 55;
-  current.hasSync = true;
+  setSyncStatus(SyncStatus::Full);
   resetEngineProtect(current);
 }
 
@@ -222,9 +226,9 @@ static void test_canUseEventAverage(void) {
 
   TEST_ASSERT_TRUE(canUseEventAverage(current, page2));
 
-  current.hasSync = false;
+  setSyncStatus(SyncStatus::None);
   TEST_ASSERT_FALSE(canUseEventAverage(current, page2));
-  current.hasSync = true;
+  setSyncStatus(SyncStatus::Full);
 
   current.startRevolutions = 1;
   TEST_ASSERT_FALSE(canUseEventAverage(current, page2));
@@ -278,7 +282,7 @@ static void test_eventAverageMAPReading_fallback_instantaneous(void) {
   eventAverageMAPReading_test_data test_data;
   setup_event_average(test_data);
 
-  test_data.current.hasSync = false;
+  setSyncStatus(SyncStatus::None);
   test_data.sensorReadings.mapADC = 0x1234;
   test_data.sensorReadings.emapADC = 0x1234;
 

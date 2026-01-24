@@ -15,7 +15,6 @@ Timers are typically low resolution (Compared to Schedulers), with maximum frequ
 #include "sensors.h"
 #include "scheduler.h"
 #include "scheduledIO.h"
-#include "speeduino.h"
 #include "scheduler.h"
 #include "auxiliaries.h"
 #include "comms.h"
@@ -62,7 +61,7 @@ void initialiseTimers(void)
 
 static inline void applyOverDwellCheck(IgnitionSchedule &schedule, uint32_t targetOverdwellTime) {
   //Check first whether each spark output is currently on. Only check it's dwell time if it is
-  if ((schedule.Status == RUNNING) && (schedule.startTime < targetOverdwellTime)) { 
+  if ((isRunning(schedule)) && (schedule.startTime < targetOverdwellTime)) { 
     schedule.pEndCallback(); schedule.Status = OFF; 
   }
 }
@@ -292,8 +291,7 @@ void oneMSInterval(void) //Most ARM chips can simply call a function
         if(currentStatus.RPM == 0)
         {
           //If we reach here then the priming is complete, however only turn off the fuel pump if the engine isn't running
-          digitalWrite(pinFuelPump, LOW);
-          currentStatus.fuelPumpOn = false;
+          FUEL_PUMP_OFF();
         }
       }
     }

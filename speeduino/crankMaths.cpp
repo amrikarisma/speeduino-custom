@@ -1,6 +1,7 @@
+#include <avr-fast-shift.h>
 #include "globals.h"
 #include "crankMaths.h"
-#include "bit_shifts.h"
+#include "preprocessor.h"
 
 #define SECOND_DERIV_ENABLED                0          
 
@@ -29,18 +30,21 @@ static constexpr uint8_t degreesPerMicro_Shift = UQ1X15_Shift;
 
 void setAngleConverterRevolutionTime(uint32_t revolutionTime) {
   microsPerDegree = div360(lshift<microsPerDegree_Shift>(revolutionTime));
-  degreesPerMicro = (uint16_t)UDIV_ROUND_CLOSEST(lshift<degreesPerMicro_Shift>(UINT32_C(360)), revolutionTime, uint32_t);
+  constexpr uint32_t UQ1X15_360 = UINT32_C(360) << degreesPerMicro_Shift;
+  degreesPerMicro = (uint16_t)fast_div_closest(UQ1X15_360, revolutionTime);
 }
 
-uint32_t angleToTimeMicroSecPerDegree(uint16_t angle) {
+BEGIN_LTO_ALWAYS_INLINE(uint32_t) angleToTimeMicroSecPerDegree(uint16_t angle) {
   UQ24X8_t micros = (uint32_t)angle * (uint32_t)microsPerDegree;
   return rshift_round<microsPerDegree_Shift>(micros);
 }
+END_LTO_INLINE()
 
-uint16_t timeToAngleDegPerMicroSec(uint32_t time) {
+BEGIN_LTO_ALWAYS_INLINE(uint16_t) timeToAngleDegPerMicroSec(uint32_t time) {
     uint32_t degFixed = time * (uint32_t)degreesPerMicro;
     return rshift_round<degreesPerMicro_Shift>(degFixed);
 }
+END_LTO_INLINE()
 
 #if SECOND_DERIV_ENABLED!=0
 void doCrankSpeedCalcs(void)

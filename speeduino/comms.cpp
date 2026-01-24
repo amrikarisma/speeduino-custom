@@ -18,8 +18,7 @@ A full copy of the license may be found in the projects root directory
 #include "page_crc.h"
 #include "logger.h"
 #include "comms_legacy.h"
-#include "src/FastCRC/FastCRC.h"
-#include <avr/pgmspace.h>
+#include <FastCRC.h>
 #ifdef RTC_ENABLED
   #include "rtc_common.h"
   #include "comms_sd.h"
@@ -363,8 +362,6 @@ static void generateLiveValues(uint16_t offset, uint16_t packetLength)
     currentStatus.secl = 0; 
   }
 
-  currentStatus.hasFullSync = currentStatus.hasSync; //Set the sync bit of the Spark variable to match the hasSync variable
-
   serialPayload[0] = SERIAL_RC_OK;
   for(uint16_t x=0; x<packetLength; x++)
   {
@@ -372,6 +369,16 @@ static void generateLiveValues(uint16_t offset, uint16_t packetLength)
   }
   // Reset any flags that are being used to trigger page refreshes
   currentStatus.vssUiRefresh = false;
+}
+
+// Abstract the FastCrC32 functions 
+// - they have have very slight differences in signatures, which causes the Arduino
+// compiler to fail for some boards (the Platform IO compiler works fine though)
+static inline uint32_t initializeCrc(uint8_t buffer) {
+  return CRC32_calibration.crc32(&buffer, 1U);
+}
+static inline uint32_t updateCrc(uint8_t buffer) {
+  return CRC32_calibration.crc32_upd(&buffer, 1U);
 }
 
 /**
@@ -382,9 +389,9 @@ static void generateLiveValues(uint16_t offset, uint16_t packetLength)
  */
 static void loadO2CalibrationChunk(uint16_t offset, uint16_t chunkSize)
 {
-  using pCrcCalc = uint32_t (FastCRC32::*)(const uint8_t *, const uint16_t, bool);
+  using pCrcCalc = uint32_t (*)(uint8_t);
   // First pass through the loop, we need to INITIALIZE the CRC
-  pCrcCalc pCrcFun = offset==0U ? &FastCRC32::crc32 : &FastCRC32::crc32_upd;
+  pCrcCalc pCrcFun = offset==0U ? &initializeCrc : &updateCrc;
   uint32_t calibrationCRC = 0U;
 
   //Read through the current chunk (Should be 256 bytes long)
@@ -402,15 +409,15 @@ static void loadO2CalibrationChunk(uint16_t offset, uint16_t chunkSize)
     }
 
     //Update the CRC
-    calibrationCRC = (CRC32_calibration.*pCrcFun)(&serialPayload[x+7U], 1, false);
+    calibrationCRC = (*pCrcFun)(serialPayload[x+7U]);
     // Subsequent passes through the loop, we need to UPDATE the CRC
-    pCrcFun = &FastCRC32::crc32_upd;
+    pCrcFun = &updateCrc;
   }
  
   if( offset >= 1023U ) 
   {
     //All chunks have been received (1024 values). Finalise the CRC and burn to EEPROM
-    storeCalibrationCRC32(O2_CALIBRATION_PAGE, ~calibrationCRC);
+    storeCalibrationCRC32(O2_CALIBRATION_PAGE, calibrationCRC);
     writeCalibrationPage(O2_CALIBRATION_PAGE);
   }
 }
@@ -1092,7 +1099,7 @@ void sendToothLog(void)
     (void)serialWrite((uint16_t)(sizeof(toothHistory) + 1U)); //Size of the tooth log (uint32_t values) plus the return code
     //Begin new CRC hash
     const uint8_t returnCode = SERIAL_RC_OK;
-    CRC32_val = CRC32_serial.crc32(&returnCode, 1, false);
+    CRC32_val = CRC32_serial.crc32(&returnCode, 1);
 
     //Send the return code
     writeByteReliableBlocking(returnCode);
@@ -1110,15 +1117,12 @@ void sendToothLog(void)
 
     //Transmit the tooth time
     uint32_t transmitted = serialWrite(toothHistory[logItemsTransmitted]);
-    CRC32_val = CRC32_serial.crc32_upd((const byte*)&transmitted, sizeof(transmitted), false);
+    CRC32_val = CRC32_serial.crc32_upd((const byte*)&transmitted, sizeof(transmitted));
   }
   currentStatus.isToothLog1Full = false;
   serialStatusFlag = SERIAL_INACTIVE;
   toothHistoryIndex = 0;
   logItemsTransmitted = 0;
-
-  //Apply the CRC reflection
-  CRC32_val = ~CRC32_val;
 
   //Send the CRC
   (void)serialWrite(CRC32_val);
@@ -1145,7 +1149,7 @@ void sendCompositeLog(void)
     
     //Begin new CRC hash
     const uint8_t returnCode = SERIAL_RC_OK;
-    CRC32_val = CRC32_serial.crc32(&returnCode, 1, false);
+    CRC32_val = CRC32_serial.crc32(&returnCode, 1);
 
     //Send the return code
     writeByteReliableBlocking(returnCode);
@@ -1162,19 +1166,16 @@ void sendCompositeLog(void)
     }
 
     uint32_t transmitted = serialWrite(toothHistory[logItemsTransmitted]); //This combined runtime (in us) that the log was going for by this record
-    (void)CRC32_serial.crc32_upd((const byte*)&transmitted, sizeof(transmitted), false);
+    (void)CRC32_serial.crc32_upd((const byte*)&transmitted, sizeof(transmitted));
 
     //The status byte (Indicates the trigger edge, whether it was a pri/sec pulse, the sync status)
     writeByteReliableBlocking(compositeLogHistory[logItemsTransmitted]);
-    CRC32_val = CRC32_serial.crc32_upd((const byte*)&compositeLogHistory[logItemsTransmitted], sizeof(compositeLogHistory[logItemsTransmitted]), false);
+    CRC32_val = CRC32_serial.crc32_upd((const byte*)&compositeLogHistory[logItemsTransmitted], sizeof(compositeLogHistory[logItemsTransmitted]));
   }
   currentStatus.isToothLog1Full = false;
   toothHistoryIndex = 0;
   serialStatusFlag = SERIAL_INACTIVE;
   logItemsTransmitted = 0;
-
-  //Apply the CRC reflection
-  CRC32_val = ~CRC32_val;
 
   //Send the CRC
   (void)serialWrite(CRC32_val);

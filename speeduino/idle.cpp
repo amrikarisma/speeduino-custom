@@ -6,7 +6,7 @@ A full copy of the license may be found in the projects root directory
 #include "idle.h"
 #include "maths.h"
 #include "timers.h"
-#include "utilities.h"
+#include "preprocessor.h"
 #include "src/PID_v1/PID_v1.h"
 #include "units.h"
 
@@ -31,15 +31,15 @@ uint16_t idle_pwm_max_count; //Used for variable PWM frequency
 volatile unsigned int idle_pwm_cur_value;
 long idle_pid_target_value;
 long FeedForwardTerm;
-unsigned long idle_pwm_target_value;
+static uint32_t idle_pwm_target_value;
 long idle_cl_target_rpm;
 
-PORT_TYPE idle_pin_port;
-PINMASK_TYPE idle_pin_mask;
-PORT_TYPE idle2_pin_port;
-PINMASK_TYPE idle2_pin_mask;
-PORT_TYPE idleUpOutput_pin_port;
-PINMASK_TYPE idleUpOutput_pin_mask;
+port_register_t idle_pin_port;
+pin_mask_t idle_pin_mask;
+port_register_t idle2_pin_port;
+pin_mask_t idle2_pin_mask;
+port_register_t idleUpOutput_pin_port;
+pin_mask_t idleUpOutput_pin_mask;
 
 static table2D_u8_u8_10 iacPWMTable(&configPage6.iacBins, &configPage6.iacOLPWMVal);
 static table2D_u8_u8_10 iacStepTable(&configPage6.iacBins, &configPage6.iacOLStepVal);
@@ -469,7 +469,7 @@ void idleControl(void)
 
           // Now assign the real PWM value
           idle_pwm_target_value = TEMP_idle_pwm_target_value>>2; //increased resolution
-          currentStatus.idleLoad = udiv_32_16(idle_pwm_target_value * 100UL, idle_pwm_max_count);
+          currentStatus.idleLoad = fast_div32_16((uint32_t)(idle_pwm_target_value * 100UL), idle_pwm_max_count);
         }
         idleCounter++;
       }
