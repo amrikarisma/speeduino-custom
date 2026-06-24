@@ -5,45 +5,29 @@
 #include "decoders.h"
 
 extern uint16_t calculateRequiredFuel(const config2 &page2, const statuses &current);
-extern void setSyncStatus(SyncStatus syncStatus);
 
 static void test_calculateRequiredFuel_2stroke(void) {
   config2 page2 = {};
+  statuses current = {};
   page2.reqFuel = 11; // ms*10?
   page2.strokes = TWO_STROKE;
 
-  statuses current = {};
-  page2.injLayout = INJ_PAIRED;
-  setSyncStatus(SyncStatus::Full);
+  current.injLayout = INJ_PAIRED;
   TEST_ASSERT_EQUAL(page2.reqFuel*100U, calculateRequiredFuel(page2, current));
-  setSyncStatus(SyncStatus::Partial);
-  TEST_ASSERT_EQUAL(page2.reqFuel*100U, calculateRequiredFuel(page2, current));
-
-  page2.injLayout = INJ_SEQUENTIAL;
-  setSyncStatus(SyncStatus::Full);
-  TEST_ASSERT_EQUAL(page2.reqFuel*100U, calculateRequiredFuel(page2, current));
-  setSyncStatus(SyncStatus::Partial);
+  current.injLayout = INJ_SEQUENTIAL;
   TEST_ASSERT_EQUAL(page2.reqFuel*100U, calculateRequiredFuel(page2, current));
 }
 
 static void test_calculateRequiredFuel_4stroke(void) {
   config2 page2 = {};
+  statuses current = {};
   page2.reqFuel = 11; // ms*10?
   page2.strokes = FOUR_STROKE;
 
-  statuses current = {};
-
-  page2.injLayout = INJ_PAIRED;
-  setSyncStatus(SyncStatus::Full);
+  current.injLayout = INJ_PAIRED;
   TEST_ASSERT_EQUAL((page2.reqFuel*100U)/2U, calculateRequiredFuel(page2, current));
-  setSyncStatus(SyncStatus::Partial);
-  TEST_ASSERT_EQUAL((page2.reqFuel*100U)/2U, calculateRequiredFuel(page2, current));
-
-  page2.injLayout = INJ_SEQUENTIAL;  
-  setSyncStatus(SyncStatus::Full);
+  current.injLayout = INJ_SEQUENTIAL;
   TEST_ASSERT_EQUAL(page2.reqFuel*100U, calculateRequiredFuel(page2, current));
-  setSyncStatus(SyncStatus::Partial);
-  TEST_ASSERT_EQUAL((page2.reqFuel*100U)/2U, calculateRequiredFuel(page2, current));
 }
 
 

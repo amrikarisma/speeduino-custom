@@ -3,10 +3,14 @@
 #include "decoders.h"
 #include "init.h"
 #include "maths.h"
-#include "utilities.h"
 #include "preprocessor.h"
 #include "units.h"
 #include "board_definition.h" 
+#include "decoder_init.h"
+#include "scheduledIO_inj.h"
+#include "resetControl.h"
+#include "scheduler.h"
+#include "scheduler_fuel_controller.h"
 
 static byte setStatusBit(byte status, uint8_t index, bool bit)
 {
@@ -33,10 +37,10 @@ static inline byte setStatusBits(byte status, bool (&bits)[N])
 static byte buildStatus1(const statuses &current)
 {
   bool bits[] = {
-    current.isInj1Open,
-    current.isInj2Open,
-    current.isInj3Open,
-    current.isInj4Open,
+    BIT_CHECK(getInjectorStatus(), 0),
+    BIT_CHECK(getInjectorStatus(), 1),
+    BIT_CHECK(getInjectorStatus(), 2),
+    BIT_CHECK(getInjectorStatus(), 3),
     current.isDFCOActive,
     false, // Unused
     current.isToothLog1Full,
@@ -49,12 +53,12 @@ static byte buildStatus2(const statuses &current)
   bool bits[] = {
     current.hardLaunchActive,
     current.softLaunchActive,
-    current.hardLimitActive,
+    current.schedulerCutState.status == SchedulerCutStatus::Full,
     current.softLimitActive,
     false, // Unused
     false, // Unused
     current.idleOn,
-    getSyncStatus()==SyncStatus::Full,
+    current.decoder.getStatus().syncStatus==SyncStatus::Full,
   };
   return setStatusBits(0U, bits);
 }
@@ -62,11 +66,11 @@ static byte buildStatus2(const statuses &current)
 static byte buildStatus3(const statuses &current)
 {
   bool bits[] = {
-    current.resetPreventActive,
+    isResetPreventActive(),
     current.nitrousActive,
     current.secondFuelTableActive,
     current.vssUiRefresh,
-    getSyncStatus()==SyncStatus::Partial,
+    current.decoder.getStatus().syncStatus==SyncStatus::Partial,
   };
   byte status3 = setStatusBits(0U, bits);
   status3 |= (current.nSquirtsStatus << 5U); // Uses bits 5-7
@@ -104,8 +108,8 @@ static byte buildStatus5(const statuses &current)
 byte buildEngineStatus(const statuses &current)
 {
   bool bits[] = {
-    current.engineIsRunning,
-    current.engineIsCranking,
+    current.rotationStatus==EngineRotationStatus::Running,
+    current.rotationStatus==EngineRotationStatus::Cranking,
     current.aseIsActive,
     current.wueIsActive,
     current.isAcceleratingTPS,
@@ -154,13 +158,14 @@ static byte buildAirConStatus(const statuses &current)
 static byte buildEngineProtectStatus(const statuses &current)
 {
   bool bits[] = {
-    current.engineProtectRpm,
-    current.engineProtectBoostCut,
-    current.engineProtectOil,
-    current.engineProtectAfr,
-    current.engineProtectClt,
+    current.engineProtect.rpm,
+    current.engineProtect.boostCut,
+    current.engineProtect.oil,
+    current.engineProtect.afr,
+    current.engineProtect.coolant,
     false, // Unused
-    current.engineProtectIoError,    
+    false, // Unused
+    current.ioError,    
   };
   return setStatusBits(0, bits);
 }
@@ -278,14 +283,14 @@ byte getTSLogEntry(uint16_t byteNum)
     case 74: statusValue = currentStatus.tpsADC; break;
     case 75: statusValue = 0U /*getNextError()*/; break;
 
-    case 76: statusValue = lowByte(currentStatus.PW1); break;
-    case 77: statusValue = highByte(currentStatus.PW1); break;
-    case 78: statusValue = lowByte(currentStatus.PW2); break;
-    case 79: statusValue = highByte(currentStatus.PW2); break;
-    case 80: statusValue = lowByte(currentStatus.PW3); break;
-    case 81: statusValue = highByte(currentStatus.PW3); break;
-    case 82: statusValue = lowByte(currentStatus.PW4); break;
-    case 83: statusValue = highByte(currentStatus.PW4); break;
+    case 76: statusValue = lowByte(fuelSchedule1.pw); break;
+    case 77: statusValue = highByte(fuelSchedule1.pw); break;
+    case 78: statusValue = lowByte(fuelSchedule2.pw); break;
+    case 79: statusValue = highByte(fuelSchedule2.pw); break;
+    case 80: statusValue = lowByte(fuelSchedule3.pw); break;
+    case 81: statusValue = highByte(fuelSchedule3.pw); break;
+    case 82: statusValue = lowByte(fuelSchedule4.pw); break;
+    case 83: statusValue = highByte(fuelSchedule4.pw); break;
 
     case 84: statusValue = buildStatus3(currentStatus); break;
     case 85: statusValue = buildEngineProtectStatus(currentStatus); break;
@@ -333,16 +338,22 @@ byte getTSLogEntry(uint16_t byteNum)
     case 127: statusValue = buildStatus5(currentStatus); break;
     case 128: statusValue = currentStatus.knockCount; break;
     case 129: statusValue = currentStatus.knockRetard; break;
-
-    case 130: statusValue = lowByte(currentStatus.PW5); break;
-    case 131: statusValue = highByte(currentStatus.PW5); break;
-    case 132: statusValue = lowByte(currentStatus.PW6); break;
-    case 133: statusValue = highByte(currentStatus.PW6); break;
-    case 134: statusValue = lowByte(currentStatus.PW7); break;
-    case 135: statusValue = highByte(currentStatus.PW7); break;
-    case 136: statusValue = lowByte(currentStatus.PW8); break;
-    case 137: statusValue = highByte(currentStatus.PW8); break;
-
+#if INJ_CHANNELS >= 5
+    case 130: statusValue = lowByte(fuelSchedule5.pw); break;
+    case 131: statusValue = highByte(fuelSchedule5.pw); break;
+#endif
+#if INJ_CHANNELS >= 6
+    case 132: statusValue = lowByte(fuelSchedule6.pw); break;
+    case 133: statusValue = highByte(fuelSchedule6.pw); break;
+#endif
+#if INJ_CHANNELS >= 7
+    case 134: statusValue = lowByte(fuelSchedule7.pw); break;
+    case 135: statusValue = highByte(fuelSchedule7.pw); break;
+#endif
+#if INJ_CHANNELS >= 8
+    case 136: statusValue = lowByte(fuelSchedule8.pw); break;
+    case 137: statusValue = highByte(fuelSchedule8.pw); break;
+#endif
     case 138: statusValue = currentStatus.systemTemp; break;
     default: statusValue = 0; // MISRA check
   }
@@ -427,10 +438,10 @@ int16_t getReadableLogEntry(uint16_t logIndex)
     case 51: statusValue = currentStatus.tpsADC; break;
     case 52: statusValue = 0U /*getNextError()*/; break;
 
-    case 53: statusValue = currentStatus.PW1; break;
-    case 54: statusValue = currentStatus.PW2; break;
-    case 55: statusValue = currentStatus.PW3; break;
-    case 56: statusValue = currentStatus.PW4; break;
+    case 53: statusValue = fuelSchedule1.pw; break;
+    case 54: statusValue = fuelSchedule2.pw; break;
+    case 55: statusValue = fuelSchedule3.pw; break;
+    case 56: statusValue = fuelSchedule4.pw; break;
   
     case 57: statusValue = buildStatus3(currentStatus); break;
     case 58: statusValue = buildEngineProtectStatus(currentStatus); break;
@@ -471,10 +482,18 @@ int16_t getReadableLogEntry(uint16_t logIndex)
     case 91: statusValue = buildStatus5(currentStatus); break;
     case 92: statusValue = currentStatus.knockCount; break;
     case 93: statusValue = currentStatus.knockRetard; break;
-    case 94: statusValue = currentStatus.PW5; break;
-    case 95: statusValue = currentStatus.PW6; break;
-    case 96: statusValue = currentStatus.PW7; break;
-    case 97: statusValue = currentStatus.PW8; break;
+#if INJ_CHANNELS >= 5
+    case 94: statusValue = fuelSchedule5.pw; break;
+#endif
+#if INJ_CHANNELS >= 6
+    case 95: statusValue = fuelSchedule6.pw; break;
+#endif
+#if INJ_CHANNELS >= 7
+    case 96: statusValue = fuelSchedule7.pw; break;
+#endif
+#if INJ_CHANNELS >= 8
+    case 97: statusValue = fuelSchedule8.pw; break;
+#endif
     case 98: statusValue = currentStatus.systemTemp; break;
     default: statusValue = 0; // MISRA check
   }
@@ -501,10 +520,10 @@ float getReadableFloatLogEntry(uint16_t logIndex)
     case 21: statusValue = currentStatus.TPS / 2.0; break; // TPS (0% to 100% = 0 to 200)
     case 33: statusValue = currentStatus.O2_2 / 10.0; break; //O2
 
-    case 53: statusValue = currentStatus.PW1 / 1000.0; break; //Pulsewidth 1 Have to convert from uS to mS.
-    case 54: statusValue = currentStatus.PW2 / 1000.0; break; //Pulsewidth 2 Have to convert from uS to mS.
-    case 55: statusValue = currentStatus.PW3 / 1000.0; break; //Pulsewidth 3 Have to convert from uS to mS.
-    case 56: statusValue = currentStatus.PW4 / 1000.0; break; //Pulsewidth 4 Have to convert from uS to mS.
+    case 53: statusValue = fuelSchedule1.pw / 1000.0; break; //Pulsewidth 1 Have to convert from uS to mS.
+    case 54: statusValue = fuelSchedule2.pw / 1000.0; break; //Pulsewidth 2 Have to convert from uS to mS.
+    case 55: statusValue = fuelSchedule3.pw / 1000.0; break; //Pulsewidth 3 Have to convert from uS to mS.
+    case 56: statusValue = fuelSchedule4.pw / 1000.0; break; //Pulsewidth 4 Have to convert from uS to mS.
 
     default: statusValue = getReadableLogEntry(logIndex); break; //If logIndex value is NOT a float based one, use the regular function
   }
@@ -540,8 +559,8 @@ uint8_t getLegacySecondarySerialLogEntry(uint16_t byteNum)
     case 17: statusValue = currentStatus.corrections; break; //Total GammaE (%)
     case 18: statusValue = currentStatus.VE; break; //Current VE 1 (%)
     case 19: statusValue = currentStatus.afrTarget; break;
-    case 20: statusValue = lowByte(currentStatus.PW1); break; //Pulsewidth 1 multiplied by 10 in ms. Have to convert from uS to mS.
-    case 21: statusValue = highByte(currentStatus.PW1); break; //Pulsewidth 1 multiplied by 10 in ms. Have to convert from uS to mS.
+    case 20: statusValue = lowByte(fuelSchedule1.pw); break; //Pulsewidth 1 multiplied by 10 in ms. Have to convert from uS to mS.
+    case 21: statusValue = highByte(fuelSchedule1.pw); break; //Pulsewidth 1 multiplied by 10 in ms. Have to convert from uS to mS.
     case 22: statusValue = (uint8_t)(currentStatus.tpsDOT / 10); break; //TPS DOT
     case 23: statusValue = currentStatus.advance; break;
     case 24: statusValue = currentStatus.TPS; break; // TPS (0% to 100%)
@@ -600,12 +619,12 @@ uint8_t getLegacySecondarySerialLogEntry(uint16_t byteNum)
     case 74: statusValue = 0U /*getNextError()*/; break; // errorNum (0:1), currentError(2:7)
 
     case 75: statusValue = currentStatus.launchCorrection; break;
-    case 76: statusValue = lowByte(currentStatus.PW2); break; //Pulsewidth 2 multiplied by 10 in ms. Have to convert from uS to mS.
-    case 77: statusValue = highByte(currentStatus.PW2); break; //Pulsewidth 2 multiplied by 10 in ms. Have to convert from uS to mS.
-    case 78: statusValue = lowByte(currentStatus.PW3); break; //Pulsewidth 3 multiplied by 10 in ms. Have to convert from uS to mS.
-    case 79: statusValue = highByte(currentStatus.PW3); break; //Pulsewidth 3 multiplied by 10 in ms. Have to convert from uS to mS.
-    case 80: statusValue = lowByte(currentStatus.PW4); break; //Pulsewidth 4 multiplied by 10 in ms. Have to convert from uS to mS.
-    case 81: statusValue = highByte(currentStatus.PW4); break; //Pulsewidth 4 multiplied by 10 in ms. Have to convert from uS to mS.
+    case 76: statusValue = lowByte(fuelSchedule2.pw); break; //Pulsewidth 2 multiplied by 10 in ms. Have to convert from uS to mS.
+    case 77: statusValue = highByte(fuelSchedule2.pw); break; //Pulsewidth 2 multiplied by 10 in ms. Have to convert from uS to mS.
+    case 78: statusValue = lowByte(fuelSchedule3.pw); break; //Pulsewidth 3 multiplied by 10 in ms. Have to convert from uS to mS.
+    case 79: statusValue = highByte(fuelSchedule3.pw); break; //Pulsewidth 3 multiplied by 10 in ms. Have to convert from uS to mS.
+    case 80: statusValue = lowByte(fuelSchedule4.pw); break; //Pulsewidth 4 multiplied by 10 in ms. Have to convert from uS to mS.
+    case 81: statusValue = highByte(fuelSchedule4.pw); break; //Pulsewidth 4 multiplied by 10 in ms. Have to convert from uS to mS.
 
     case 82: statusValue = buildStatus3(currentStatus); break;
     case 83: statusValue = buildEngineProtectStatus(currentStatus); break; //RPM(0), MAP(1), OIL(2), AFR(3), Unused(4:7)
@@ -682,6 +701,12 @@ bool is2ByteEntry(uint8_t key)
   return key == pgm_read_byte(&fsIntIndex[bot]);
 }
 
+static inline void attachLoggerInterrupt(uint8_t pin, void (*loggerISR)(void))
+{
+  detachInterrupt( digitalPinToInterrupt(pin) );
+  attachInterrupt( digitalPinToInterrupt(pin), loggerISR, CHANGE );
+}
+
 void startToothLogger(void)
 {
   currentStatus.toothLogEnabled = true;
@@ -690,15 +715,18 @@ void startToothLogger(void)
   toothHistoryIndex = 0U;
 
   //Disconnect the standard interrupt and add the logger version
-  detachInterrupt( digitalPinToInterrupt(pinTrigger) );
-  attachInterrupt( digitalPinToInterrupt(pinTrigger), loggerPrimaryISR, CHANGE );
+  attachLoggerInterrupt( pinTrigger, loggerPrimaryISR );
 
   if(VSS_USES_RPM2() != true)
   {
-    detachInterrupt( digitalPinToInterrupt(pinTrigger2) );
-    attachInterrupt( digitalPinToInterrupt(pinTrigger2), loggerSecondaryISR, CHANGE );  
+    attachLoggerInterrupt( pinTrigger2, loggerSecondaryISR );
   }
-  
+}
+
+static inline void detachLoggerInterrupt(uint8_t pin, const interrupt_t &decoderInterrupt)
+{
+  detachInterrupt( digitalPinToInterrupt(pin) );
+  decoderInterrupt.attach(pin);
 }
 
 void stopToothLogger(void)
@@ -706,13 +734,11 @@ void stopToothLogger(void)
   currentStatus.toothLogEnabled = false;
 
   //Disconnect the logger interrupts and attach the normal ones
-  detachInterrupt( digitalPinToInterrupt(pinTrigger) );
-  attachInterrupt( digitalPinToInterrupt(pinTrigger), triggerHandler, primaryTriggerEdge );
+  detachLoggerInterrupt( pinTrigger, currentStatus.decoder.primary );
 
   if(VSS_USES_RPM2() != true)
   {
-    detachInterrupt( digitalPinToInterrupt(pinTrigger2) );
-    attachInterrupt( digitalPinToInterrupt(pinTrigger2), triggerSecondaryHandler, secondaryTriggerEdge );  
+    detachLoggerInterrupt( pinTrigger2, currentStatus.decoder.secondary );
   }
 }
 
@@ -724,13 +750,11 @@ void startCompositeLogger(void)
   toothHistoryIndex = 0U;
 
   //Disconnect the standard interrupt and add the logger version
-  detachInterrupt( digitalPinToInterrupt(pinTrigger) );
-  attachInterrupt( digitalPinToInterrupt(pinTrigger), loggerPrimaryISR, CHANGE );
+  attachLoggerInterrupt( pinTrigger, loggerPrimaryISR );
 
   if( (VSS_USES_RPM2() != true) && (FLEX_USES_RPM2() != true) )
   {
-    detachInterrupt( digitalPinToInterrupt(pinTrigger2) );
-    attachInterrupt( digitalPinToInterrupt(pinTrigger2), loggerSecondaryISR, CHANGE );
+    attachLoggerInterrupt( pinTrigger2, loggerSecondaryISR );
   }
 }
 
@@ -739,13 +763,11 @@ void stopCompositeLogger(void)
   currentStatus.compositeTriggerUsed = 0U;
 
   //Disconnect the logger interrupts and attach the normal ones
-  detachInterrupt( digitalPinToInterrupt(pinTrigger) );
-  attachInterrupt( digitalPinToInterrupt(pinTrigger), triggerHandler, primaryTriggerEdge );
+  detachLoggerInterrupt( pinTrigger, currentStatus.decoder.primary );
 
   if( (VSS_USES_RPM2() != true) && (FLEX_USES_RPM2() != true) )
   {
-    detachInterrupt( digitalPinToInterrupt(pinTrigger2) );
-    attachInterrupt( digitalPinToInterrupt(pinTrigger2), triggerSecondaryHandler, secondaryTriggerEdge );
+    detachLoggerInterrupt( pinTrigger2, currentStatus.decoder.secondary );
   }
 }
 
@@ -757,11 +779,8 @@ void startCompositeLoggerTertiary(void)
   toothHistoryIndex = 0U;
 
   //Disconnect the standard interrupt and add the logger version
-  detachInterrupt( digitalPinToInterrupt(pinTrigger) );
-  attachInterrupt( digitalPinToInterrupt(pinTrigger), loggerPrimaryISR, CHANGE );
-
-  detachInterrupt( digitalPinToInterrupt(pinTrigger3) );
-  attachInterrupt( digitalPinToInterrupt(pinTrigger3), loggerTertiaryISR, CHANGE );
+  attachLoggerInterrupt( pinTrigger, loggerPrimaryISR );
+  attachLoggerInterrupt( pinTrigger3, loggerTertiaryISR );
 }
 
 void stopCompositeLoggerTertiary(void)
@@ -769,11 +788,8 @@ void stopCompositeLoggerTertiary(void)
   currentStatus.compositeTriggerUsed = 0;
 
   //Disconnect the logger interrupts and attach the normal ones
-  detachInterrupt( digitalPinToInterrupt(pinTrigger) );
-  attachInterrupt( digitalPinToInterrupt(pinTrigger), triggerHandler, primaryTriggerEdge );
-
-  detachInterrupt( digitalPinToInterrupt(pinTrigger3) );
-  attachInterrupt( digitalPinToInterrupt(pinTrigger3), triggerTertiaryHandler, tertiaryTriggerEdge );
+  detachLoggerInterrupt( pinTrigger, currentStatus.decoder.primary );
+  detachLoggerInterrupt( pinTrigger3, currentStatus.decoder.tertiary );
 }
 
 
@@ -787,12 +803,10 @@ void startCompositeLoggerCams(void)
   //Disconnect the standard interrupt and add the logger version
   if( (VSS_USES_RPM2() != true) && (FLEX_USES_RPM2() != true) )
   {
-    detachInterrupt( digitalPinToInterrupt(pinTrigger2) );
-    attachInterrupt( digitalPinToInterrupt(pinTrigger2), loggerSecondaryISR, CHANGE );
+    attachLoggerInterrupt( pinTrigger2, loggerSecondaryISR );
   }
 
-  detachInterrupt( digitalPinToInterrupt(pinTrigger3) );
-  attachInterrupt( digitalPinToInterrupt(pinTrigger3), loggerTertiaryISR, CHANGE );
+  attachLoggerInterrupt( pinTrigger3, loggerTertiaryISR );
 }
 
 void stopCompositeLoggerCams(void)
@@ -802,10 +816,8 @@ void stopCompositeLoggerCams(void)
   //Disconnect the logger interrupts and attach the normal ones
   if( (VSS_USES_RPM2() != true) && (FLEX_USES_RPM2() != true) )
   {
-    detachInterrupt( digitalPinToInterrupt(pinTrigger2) );
-    attachInterrupt( digitalPinToInterrupt(pinTrigger2), triggerSecondaryHandler, secondaryTriggerEdge );
+    detachLoggerInterrupt( pinTrigger2, currentStatus.decoder.secondary );
   }
 
-  detachInterrupt( digitalPinToInterrupt(pinTrigger3) );
-  attachInterrupt( digitalPinToInterrupt(pinTrigger3), triggerTertiaryHandler, tertiaryTriggerEdge );
+  detachLoggerInterrupt( pinTrigger3, currentStatus.decoder.tertiary );
 }

@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include "statuses.h"
 #include "config_pages.h"
+#include "decoders.h"
 
 /**
  * @file
@@ -33,12 +34,3 @@ struct pulseWidths {
  * @return pulseWidths The primary and secondary injector pulse width in uS
  */
 pulseWidths computePulseWidths(const config2 &page2, const config6 &page6, const config10 &page10, const statuses &current);
-
-/**
- * @brief Apply the calculated pulse widths to the current system state
- * 
- * @param pulseWidths Result of computePulseWidths()
- * @param page2 Tune settings
- * @param current Current system state
- */
-void applyPwToInjectorChannels(const pulseWidths &pulse_widths, const config2 &page2, statuses &current);

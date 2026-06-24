@@ -3,6 +3,7 @@
 #include "init.h"
 #include "../test_utils.h"
 #include "storage.h"
+#include "resetControl.h"
 
 void prepareForInitialiseAll(uint8_t boardId);
 
@@ -42,21 +43,6 @@ void test_initialisation_complete(void)
   prepareForInitialiseAll(3);
   initialiseAll(); //Run the main initialise function
   TEST_ASSERT_EQUAL(true, currentStatus.initialisationComplete);
-}
-
-void test_initialisation_ports(void)
-{
-  //Test that all the port values have been set
-  prepareForInitialiseAll(3);
-  initialiseAll(); //Run the main initialise function
-  TEST_ASSERT_NOT_EQUAL(0, inj1_pin_port);
-  TEST_ASSERT_NOT_EQUAL(0, inj2_pin_port);
-  TEST_ASSERT_NOT_EQUAL(0, inj3_pin_port);
-  TEST_ASSERT_NOT_EQUAL(0, inj4_pin_port);
-  TEST_ASSERT_NOT_EQUAL(0, ign1_pin_port);
-  TEST_ASSERT_NOT_EQUAL(0, ign2_pin_port);
-  TEST_ASSERT_NOT_EQUAL(0, ign3_pin_port);
-  TEST_ASSERT_NOT_EQUAL(0, ign4_pin_port);
 }
 
 //Test that all mandatory output pins have their mode correctly set to output
@@ -199,7 +185,7 @@ void test_initialisation_outputs_PWM_idle(void)
 
   char msg[32];
   strcpy_P(msg, PSTR("Is PWM Idle"));
-  TEST_ASSERT_TRUE_MESSAGE(isIdlePWM, msg);
+  TEST_ASSERT_TRUE_MESSAGE(isPwmIac(configPage6), msg);
   strcpy_P(msg, PSTR("Idle 1"));
   TEST_ASSERT_EQUAL_MESSAGE(OUTPUT, getPinMode(pinIdle1), msg);
   strcpy_P(msg, PSTR("Idle 2"));
@@ -260,12 +246,12 @@ void test_initialisation_outputs_reset_control_use_board_default(void)
   TEST_IGNORE_MESSAGE("Test only works for Mega2560");
 #else
   prepareForInitialiseAll(9);
-  configPage4.resetControlConfig = RESET_CONTROL_PREVENT_WHEN_RUNNING;
+  configPage4.resetControlConfig = (byte)ResetControlMode::PreventWhenRunning;
   configPage4.resetControlPin = 0; // Flags to use board default
   initialiseAll(); //Run the main initialise function
 
   TEST_ASSERT_NOT_EQUAL(0, pinResetControl); 
-  TEST_ASSERT_EQUAL(resetControl, RESET_CONTROL_PREVENT_WHEN_RUNNING);
+  TEST_ASSERT_EQUAL(ResetControlMode::PreventWhenRunning, getResetControlMode());
   TEST_ASSERT_EQUAL(OUTPUT, getPinMode(pinResetControl));  
 #endif
 }
@@ -276,12 +262,12 @@ void test_initialisation_outputs_reset_control_override_board_default(void)
   TEST_IGNORE_MESSAGE("Test only works for Mega2560");
 #else
   prepareForInitialiseAll(9);
-  configPage4.resetControlConfig = RESET_CONTROL_PREVENT_WHEN_RUNNING;
+  configPage4.resetControlConfig = (byte)ResetControlMode::PreventWhenRunning;
   configPage4.resetControlPin = 45; // Use a different pin
   initialiseAll(); //Run the main initialise function
 
   TEST_ASSERT_EQUAL(45, pinResetControl);  
-  TEST_ASSERT_EQUAL(resetControl, RESET_CONTROL_PREVENT_WHEN_RUNNING);
+  TEST_ASSERT_EQUAL(ResetControlMode::PreventWhenRunning, getResetControlMode());
   TEST_ASSERT_EQUAL(OUTPUT, getPinMode(pinResetControl));
 #endif
 }
@@ -338,7 +324,6 @@ void testInitialisation()
   SET_UNITY_FILENAME() {
 
   RUN_TEST_P(test_initialisation_complete);
-  RUN_TEST_P(test_initialisation_ports);
   RUN_TEST_P(test_initialisation_outputs_V03);
   RUN_TEST_P(test_initialisation_outputs_V04);
   RUN_TEST_P(test_initialisation_outputs_MX5_8995);

@@ -117,11 +117,6 @@ constexpr uint8_t SPARK2_CONDITION_MAP = 1U;
 constexpr uint8_t SPARK2_CONDITION_TPS = 2U;
 constexpr uint8_t SPARK2_CONDITION_ETH = 3U;
 
-constexpr uint8_t RESET_CONTROL_DISABLED             = 0U;
-constexpr uint8_t RESET_CONTROL_PREVENT_WHEN_RUNNING = 1U;
-constexpr uint8_t RESET_CONTROL_PREVENT_ALWAYS       = 2U;
-constexpr uint8_t RESET_CONTROL_SERIAL_COMMAND       = 3U;
-
 constexpr uint8_t OPEN_LOOP_BOOST     = 0U;
 constexpr uint8_t CLOSED_LOOP_BOOST   = 1U;
 
@@ -161,6 +156,11 @@ enum MAPSamplingMethod {
   MAPSamplingIgnitionEventAverage= 3,
 };
 
+// A marker struct for the config pages.
+struct config_page_t
+{  
+};
+
 /** Page 2 of the config - mostly variables that are required for fuel.
  * These are "non-live" EFI setting, engine and "system" variables that remain fixed once sent
  * (and stored to e.g. EEPROM) from configuration/tuning SW (from outside by USBserial/bluetooth).
@@ -168,7 +168,7 @@ enum MAPSamplingMethod {
  * See the ini file for further reference.
  * 
  */
-struct config2 {
+struct config2 : public config_page_t {
 
   byte aseTaperTime;
   byte aeColdPct;  //AE cold clt modifier %
@@ -328,11 +328,7 @@ struct config2 {
 
   byte decelAmount;
 
-#if defined(CORE_AVR)
-  };
-#else
-  } __attribute__((packed,aligned(__alignof__(uint16_t)))); //The 32 bit systems require all structs to be fully packed, aligned to their largest member type 
-#endif
+} __attribute__((packed,aligned(__alignof__(uint16_t)))); //The 32 bit systems require all structs to be fully packed, aligned to their largest member type 
 
 constexpr uint8_t IDLEADVANCE_MODE_OFF      = 0U;
 constexpr uint8_t IDLEADVANCE_MODE_ADDED    = 1U;
@@ -350,10 +346,14 @@ static inline bool isExternalVssMode(const config2 &page2) {
   return page2.vssMode==VSS_MODE_EXTERNAL_KM
       || page2.vssMode==VSS_MODE_EXTERNAL_MI;
 }
+
+constexpr uint8_t CRANK_SPEED = 0U;
+constexpr uint8_t CAM_SPEED   = 1U;
+
 /** Page 4 of the config - variables required for ignition and rpm/crank phase /cam phase decoding.
 * See the ini file for further reference.
 */
-struct config4 {
+struct config4 : public config_page_t {
 
   int16_t triggerAngle; ///< Angle (ATDC) when tooth No:1 on the primary wheel sends signal (-360 to +360 deg.)
   int8_t FixAng; ///< Fixed Ignition angle value (enabled by @ref configPage2.fixAngEnable, copied to ignFixValue, Negative values allowed, See corrections.ino)
@@ -447,16 +447,12 @@ struct config4 {
   byte vvtMinClt;
   byte vvtDelay;
 
-#if defined(CORE_AVR)
-  };
-#else
-  } __attribute__((packed,aligned(__alignof__(uint16_t)))); //The 32 bit systems require all structs to be fully packed, aligned to their largest member type 
-#endif
+} __attribute__((packed,aligned(__alignof__(uint16_t)))); //The 32 bit systems require all structs to be fully packed, aligned to their largest member type 
 
 /** Page 6 of the config - mostly variables that are required for AFR targets and closed loop.
 See the ini file for further reference.
 */
-struct config6 {
+struct config6 : public config_page_t {
 
   byte egoAlgorithm : 2; ///< EGO Algorithm - Simple, PID, No correction
   byte egoType : 2;      ///< EGO Sensor Type 0=Disabled/None, 1=Narrowband, 2=Wideband
@@ -549,23 +545,31 @@ struct config6 {
   byte fanFreq;           // Fan PWM frequency
   byte fanPWMBins[4];     //Temperature Bins for the PWM fan control
 
-#if defined(CORE_AVR)
-  };
-#else
-  } __attribute__((packed,aligned(__alignof__(uint8_t)))); //The 32 bit systems require all structs to be fully packed, aligned to their largest member type 
-#endif
+} __attribute__((packed,aligned(__alignof__(uint8_t)))); //The 32 bit systems require all structs to be fully packed, aligned to their largest member type 
 
-#define HARD_REV_FIXED    1
-#define HARD_REV_COOLANT  2
+static inline bool isPwmIac(const config6 &page6) {
+  return page6.iacAlgorithm == IAC_ALGORITHM_PWM_OL
+      || page6.iacAlgorithm == IAC_ALGORITHM_PWM_CL
+      || page6.iacAlgorithm == IAC_ALGORITHM_PWM_OLCL;
+}
 
-#define AFR_PROTECT_OFF     0U
-#define AFR_PROTECT_FIXED   1U
-#define AFR_PROTECT_TABLE   2U
+static inline bool isStepperIac(const config6 &page6) {
+  return page6.iacAlgorithm == IAC_ALGORITHM_STEP_OL
+      || page6.iacAlgorithm == IAC_ALGORITHM_STEP_CL
+      || page6.iacAlgorithm == IAC_ALGORITHM_STEP_OLCL;
+}
+
+constexpr uint8_t HARD_REV_FIXED   = 1U;
+constexpr uint8_t HARD_REV_COOLANT = 2U;
+
+constexpr uint8_t AFR_PROTECT_OFF   = 0U;
+constexpr uint8_t AFR_PROTECT_FIXED = 1U;
+constexpr uint8_t AFR_PROTECT_TABLE = 2U;
 
 /** Page 9 of the config - mostly deals with CANBUS control.
 See ini file for further info (Config Page 10 in the ini).
 */
-struct config9 {
+struct config9 : public config_page_t {
   byte enable_secondarySerial:1;            //enable secondary serial
   byte intcan_available:1;                     //enable internal can module
   byte enable_intcan:1;
@@ -637,17 +641,13 @@ struct config9 {
   byte afrProtectCutTime; /* < Time in ms before cut. Stored value is divided by 100. Maximum of 2550 ms */
   byte afrProtectReactivationTPS; /* Disable engine protection cut once below this TPS percentage */
   
-#if defined(CORE_AVR)
-  };
-#else
-  } __attribute__((packed,aligned(__alignof__(uint16_t)))); //The 32 bit systems require all structs to be fully packed, aligned to their largest member type 
-#endif
+} __attribute__((packed,aligned(__alignof__(uint16_t)))); //The 32 bit systems require all structs to be fully packed, aligned to their largest member type 
 
 /** Page 10 - No specific purpose. Created initially for the cranking enrich curve.
 192 bytes long.
 See ini file for further info (Config Page 11 in the ini).
 */
-struct config10 {
+struct config10 : public config_page_t {
   byte crankingEnrichBins[4]; //Bytes 0-3
   byte crankingEnrichValues[4]; //Bytes 4-7
 
@@ -748,7 +748,7 @@ struct config10 {
   byte vvtCLKI; //Byte 128
   byte vvtCLKD; //Byte 129
   int16_t vvtCL0DutyAng; //Bytes 130-131
-  uint8_t vvtCLMinAng; //Byte 132
+  int8_t vvtCLMinAng; //Byte 132
   uint8_t vvtCLMaxAng; //Byte 133
 
   byte crankingEnrichTaper; //Byte 134
@@ -823,25 +823,27 @@ struct config10 {
   //Byte 191
   byte lnchCtrlVss;
 
-#if defined(CORE_AVR)
-  };
-#else
-  } __attribute__((packed,aligned(2))); //The 32 bit systems require all structs to be fully packed, aligned to their largest member type 
-#endif
+} __attribute__((packed,aligned(__alignof__(uint16_t)))); //The 32 bit systems require all structs to be fully packed, aligned to their largest member type 
+
 /** Config for programmable I/O comparison operation (between 2 vars).
  * Operations are implemented in utilities.ino (@ref checkProgrammableIO()).
  */
-struct cmpOperation{
+struct cmpOperation {
   uint8_t firstCompType : 3;  ///< First cmp. op (COMPARATOR_* ops, see below)
   uint8_t secondCompType : 3; ///< Second cmp. op (0=COMPARATOR_EQUAL, 1=COMPARATOR_NOT_EQUAL,2=COMPARATOR_GREATER,3=COMPARATOR_GREATER_EQUAL,4=COMPARATOR_LESS,5=COMPARATOR_LESS_EQUAL,6=COMPARATOR_CHANGE)
   uint8_t bitwise : 2; ///< BITWISE_AND, BITWISE_OR, BITWISE_XOR
 };
 
+constexpr uint8_t SD_LOGGER_RATE_1HZ = 0;
+constexpr uint8_t SD_LOGGER_RATE_4HZ = 1;
+constexpr uint8_t SD_LOGGER_RATE_10HZ = 2;
+constexpr uint8_t SD_LOGGER_RATE_30HZ = 3;
+
 /**
 Page 13 - Programmable outputs logic rules.
 128 bytes long. Rules implemented in utilities.ino @ref checkProgrammableIO().
 */
-struct config13 {
+struct config13 : public config_page_t {
   uint8_t outputInverted; ///< Invert (on/off) value before writing to output pin (for all programmable I/O:s).
   uint8_t kindOfLimiting; ///< Select which kind of output limiting are active (0 - minimum | 1 - maximum)
   uint8_t outputPin[8];   ///< Disable(0) or enable (set to valid pin number) Programmable Pin (output/target pin to set)
@@ -884,17 +886,13 @@ struct config13 {
   byte hwTestIgnDuration;
   byte hwTestInjDuration;
 
-#if defined(CORE_AVR)
-  };
-#else
-  } __attribute__((packed,aligned(__alignof__(uint16_t)))); //The 32 bit systems require all structs to be fully packed, aligned to their largest member type 
-#endif
+} __attribute__((packed,aligned(__alignof__(uint16_t)))); //The 32 bit systems require all structs to be fully packed, aligned to their largest member type 
 
 /**
 Page 15 - second page for VVT and boost control.
 256 bytes long. 
 */
-struct config15 {
+struct config15 : public config_page_t {
   byte boostControlEnable : 1; 
   byte unused15_1 : 7; //7bits unused
   byte boostDCWhenDisabled;
@@ -934,8 +932,4 @@ struct config15 {
   //Bytes 106-255
   byte Unused15_106_255[150];
 
-#if defined(CORE_AVR)
-  };
-#else
-  } __attribute__((packed,aligned(__alignof__(uint16_t)))); //The 32 bit systems require all structs to be fully packed, aligned to their largest member type 
-#endif
+} __attribute__((packed,aligned(__alignof__(uint16_t)))); //The 32 bit systems require all structs to be fully packed, aligned to their largest member type 

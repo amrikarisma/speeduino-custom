@@ -2,25 +2,31 @@
 #include <Arduino.h>
 #include <unity.h>
 #include "../test_utils.h"
-#include "scheduler.h"
+#include "scheduler_fuel_controller.h"
 #include "channel_test_helpers.h"
+#include "scheduler_ignition_controller.h"
 
-#define TIMEOUT 1000
-#define DURATION 1000
-#define DELTA 20
+constexpr uint32_t TIMEOUT = 1000U;
+constexpr uint16_t DURATION = 1000U;
+constexpr uint32_t DELTA = ticksToMicros(6U);
 
 static uint32_t start_time, end_time;
 static void startCallback(void) { start_time = micros(); }
 static void endCallback(void) { end_time = micros(); }
 
+static void test_accuracy_duration(Schedule &schedule)
+{
+    setCallbacks(schedule, startCallback, endCallback);
+    setSchedule(schedule, TIMEOUT, DURATION, true);
+    while(schedule._status != OFF) /*Wait*/ ;
+    TEST_ASSERT_UINT32_WITHIN(DELTA, DURATION, end_time - start_time);
+}
+
 static void test_accuracy_duration_inj(FuelSchedule &schedule)
 {
-    initialiseFuelSchedulers();
+    schedule.reset();
     startFuelSchedulers();
-    setCallbacks(schedule, startCallback, endCallback);
-    setFuelSchedule(schedule, TIMEOUT, DURATION);
-    while(schedule.Status != OFF) /*Wait*/ ;
-    TEST_ASSERT_UINT32_WITHIN(DELTA, DURATION, end_time - start_time);
+    test_accuracy_duration(schedule);
     stopFuelSchedulers();
 }
 
@@ -66,12 +72,9 @@ static void test_accuracy_duration_inj8(void)
 
 static void test_accuracy_duration_ign(IgnitionSchedule &schedule)
 {
-    initialiseIgnitionSchedulers();
+    schedule.reset();
     startIgnitionSchedulers();
-    setCallbacks(schedule, startCallback, endCallback);
-    setIgnitionSchedule(schedule, TIMEOUT, DURATION);
-    while(schedule.Status != OFF) /*Wait*/ ;
-    TEST_ASSERT_UINT32_WITHIN(DELTA, DURATION, end_time - start_time);    
+    test_accuracy_duration(schedule);
     stopIgnitionSchedulers();
 }
 
